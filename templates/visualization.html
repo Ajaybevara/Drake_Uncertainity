@@ -290,8 +290,9 @@ let ACTIVE_TRACKS=[];  // ordered list of names to plot
 let ALL_ROWS=[];
 let CURVE_META=[];
 let activeFilter='all';
-let LAS_DEPTH_MIN=null;  // real depth bounds from LAS
+let LAS_DEPTH_MIN=null;  // real depth bounds from LAS (in LAS native unit)
 let LAS_DEPTH_MAX=null;
+let LAS_DEPTH_UNIT='m';  // depth unit from LAS file ('ft' or 'm')
 
 // ══════════════════════════════════════════════════════════════
 //  INIT
@@ -326,15 +327,26 @@ async function initViewer(){
       LOG_META[name]={type,xmin,xmax,scale:props.scale,unit:props.unit,color:props.color,reverse:props.reverse};
     });
 
-    // Capture depth range from analysis detail if available
-    if(detailRes.analysis.start_depth!==undefined&&detailRes.analysis.end_depth!==undefined){
+    // Capture depth range and unit from LAS file
+    const da = detailRes.analysis.depth_analysis || detailRes.analysis;
+    if(da.depth_unit){ LAS_DEPTH_UNIT = da.depth_unit; }
+    // Also try summary-level depth_unit
+    if(detailRes.analysis.summary && detailRes.analysis.summary.depth_unit){
+      LAS_DEPTH_UNIT = detailRes.analysis.summary.depth_unit;
+    }
+    if(da.start_depth!==undefined&&da.end_depth!==undefined){
+      LAS_DEPTH_MIN=Number(da.start_depth);
+      LAS_DEPTH_MAX=Number(da.end_depth);
+    } else if(detailRes.analysis.start_depth!==undefined&&detailRes.analysis.end_depth!==undefined){
       LAS_DEPTH_MIN=Number(detailRes.analysis.start_depth);
       LAS_DEPTH_MAX=Number(detailRes.analysis.end_depth);
     } else if(summaryRes.success&&summaryRes.summary){
-      // Fallback: read from a depth-like curve if present
       const dc=summaryRes.summary.find(r=>r.curve==='DEPTH'||r.curve==='DEPT');
       if(dc){LAS_DEPTH_MIN=Number(dc.min);LAS_DEPTH_MAX=Number(dc.max);}
     }
+    // Auto-set depth unit selector to match LAS file
+    const vzUnitSel=document.getElementById('vzDepthUnit');
+    if(vzUnitSel && LAS_DEPTH_UNIT){ vzUnitSel.value=LAS_DEPTH_UNIT; }
     if(LAS_DEPTH_MIN!==null)updateDepthRangeHint();
 
     renderAvailablePills();
@@ -534,10 +546,15 @@ async function plotTracks(){
 function updateDepthRangeHint(){
   const hint=document.getElementById('depthRangeHint');
   const unitSel=document.getElementById('vzDepthUnit');
-  const unit=unitSel?unitSel.value:'m';
-  const VZ_M2FT=3.28084;
-  const toDisplay=v=>unit==='ft'?v*VZ_M2FT:v;
+  const unit=unitSel?unitSel.value:LAS_DEPTH_UNIT;
   const lbl=unit==='ft'?'ft':'m';
+  // Convert only when display unit differs from LAS native unit
+  const VZ_M2FT=3.28084; const FT2M=1/VZ_M2FT;
+  function toDisplay(v){
+    if(unit==='ft'&&LAS_DEPTH_UNIT==='m') return v*VZ_M2FT;
+    if(unit==='m'&&LAS_DEPTH_UNIT==='ft') return v*FT2M;
+    return v; // same unit — no conversion
+  }
   // Update labels
   const minLbl=document.getElementById('depthMinLabel');
   const maxLbl=document.getElementById('depthMaxLabel');
@@ -557,12 +574,17 @@ function getDepthRangeInputs(){
   const minVal=parseFloat(document.getElementById('depthMinInput').value);
   const maxVal=parseFloat(document.getElementById('depthMaxInput').value);
   const unitSel=document.getElementById('vzDepthUnit');
-  const unit=unitSel?unitSel.value:'m';
-  const FT2M=1/3.28084;
-  const toM=v=>unit==='ft'?v*FT2M:v;
+  const unit=unitSel?unitSel.value:LAS_DEPTH_UNIT;
+  // Convert user input to LAS native unit (ft or m)
+  const VZ_M2FT=3.28084; const FT2M=1/VZ_M2FT;
+  function toLasUnit(v){
+    if(unit==='ft'&&LAS_DEPTH_UNIT==='m') return v*FT2M;
+    if(unit==='m'&&LAS_DEPTH_UNIT==='ft') return v*VZ_M2FT;
+    return v; // same unit — no conversion
+  }
   return{
-    userMin:isNaN(minVal)?null:toM(minVal),
-    userMax:isNaN(maxVal)?null:toM(maxVal),
+    userMin:isNaN(minVal)?null:toLasUnit(minVal),
+    userMax:isNaN(maxVal)?null:toLasUnit(maxVal),
     unit
   };
 }
@@ -591,8 +613,19 @@ function buildDepthAxis(rows){
   const effectiveMin = Math.min(clampedMin, clampedMax);
   const effectiveMax = Math.max(clampedMin, clampedMax);
 
-  const VZ_M2FT=3.28084;
-  const toDisp=v=>unit==='ft'?v*VZ_M2FT:v;
+  const VZ_M2FT=3.28084; const FT2M=1/VZ_M2FT;
+  // Convert LAS-native depth value to display unit
+  function toDisp(v){
+    if(unit==='ft'&&LAS_DEPTH_UNIT==='m') return v*VZ_M2FT;
+    if(unit==='m'&&LAS_DEPTH_UNIT==='ft') return v*FT2M;
+    return v;
+  }
+  // Convert display unit value back to LAS-native (for Plotly tickvals which must match DEPTH column)
+  function toLasNative(v){
+    if(unit==='ft'&&LAS_DEPTH_UNIT==='m') return v*FT2M;
+    if(unit==='m'&&LAS_DEPTH_UNIT==='ft') return v*VZ_M2FT;
+    return v;
+  }
 
   const STEP=unit==='ft'?1000:250; // 1000 ft steps vs 250 m steps
   const dispMin=toDisp(effectiveMin), dispMax=toDisp(effectiveMax);
@@ -601,13 +634,10 @@ function buildDepthAxis(rows){
   const ticks=[];
   for(let v=dMin;v<=dMax;v+=STEP)ticks.push(v);
 
-  // y values in plot are always in meters (DEPTH column), but we show labels in display unit
-  // We need tickvals in METER space, ticktext in display unit
-  const FT2M=1/VZ_M2FT;
-  const toM=v=>unit==='ft'?v*FT2M:v;
-  const tickvalsM=ticks.map(toM);
+  // tickvals must be in LAS-native unit (matching DEPTH column values)
+  const tickvalsNative=ticks.map(toLasNative);
 
-  return{range:[toM(dMax),toM(dMin)], tickvals:tickvalsM, ticktext:ticks.map(v=>v.toFixed(0)), unit};
+  return{range:[toLasNative(dMax),toLasNative(dMin)], tickvals:tickvalsNative, ticktext:ticks.map(v=>v.toFixed(0)), unit};
 }
 
 // ══════════════════════════════════════════════════════════════

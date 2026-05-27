@@ -289,10 +289,11 @@ const LIGHT = {
 };
 
 let AI_STORE = null;
-let UNC_DEPTH_MIN = null;  // real depth bounds from loaded data
+let UNC_DEPTH_MIN = null;  // real depth bounds from loaded data (LAS-native unit)
 let UNC_DEPTH_MAX = null;
 let PHI_RECORDS_CACHE = null;  // cached last-calculated records
 let SW_RECORDS_CACHE  = null;
+let UNC_LAS_DEPTH_UNIT = 'm';  // depth unit from LAS file ('ft' or 'm') — set in initUncertainty
 
 const UNC_M2FT = 3.28084;
 const UNC_FT2M = 1 / UNC_M2FT;
@@ -300,10 +301,22 @@ const UNC_FT2M = 1 / UNC_M2FT;
 function uncDepthUnit(type){
   const id = type==='phi'?'phiDepthUnit':'swDepthUnit';
   const el = document.getElementById(id);
-  return el ? el.value : 'm';
+  return el ? el.value : UNC_LAS_DEPTH_UNIT;
 }
-function uncToDisplay(valM, type){ return uncDepthUnit(type)==='ft' ? valM*UNC_M2FT : valM; }
-function uncToMeters(valDisp, type){ return uncDepthUnit(type)==='ft' ? valDisp*UNC_FT2M : valDisp; }
+// Convert LAS-native depth → chosen display unit
+function uncToDisplay(valNative, type){
+  const unit = uncDepthUnit(type);
+  if(unit==='ft' && UNC_LAS_DEPTH_UNIT==='m') return valNative * UNC_M2FT;
+  if(unit==='m'  && UNC_LAS_DEPTH_UNIT==='ft') return valNative * UNC_FT2M;
+  return valNative; // same unit — no conversion
+}
+// Convert display unit → LAS-native (for filtering against DEPTH column)
+function uncToNative(valDisp, type){
+  const unit = uncDepthUnit(type);
+  if(unit==='ft' && UNC_LAS_DEPTH_UNIT==='m') return valDisp * UNC_FT2M;
+  if(unit==='m'  && UNC_LAS_DEPTH_UNIT==='ft') return valDisp * UNC_M2FT;
+  return valDisp; // same unit — no conversion
+}
 function uncDepthLabel(type){ return uncDepthUnit(type)==='ft'?'ft':'m'; }
 
 function setUncDepthHints(min, max){
@@ -328,10 +341,10 @@ function getUncDepthRange(type){
   const maxId = type==='phi'?'phiDepthMax':'swDepthMax';
   const mn = parseFloat(document.getElementById(minId).value);
   const mx = parseFloat(document.getElementById(maxId).value);
-  // Convert display unit → meters for filtering (DEPTH values from server are always meters)
+  // Convert display unit → LAS-native unit for filtering against DEPTH column
   return {
-    userMin: isNaN(mn)?null:uncToMeters(mn, type),
-    userMax: isNaN(mx)?null:uncToMeters(mx, type)
+    userMin: isNaN(mn)?null:uncToNative(mn, type),
+    userMax: isNaN(mx)?null:uncToNative(mx, type)
   };
 }
 
@@ -381,10 +394,20 @@ function buildDepth(records, type){
   if(!d.length)return{range:[500,0],tickvals:[],ticktext:[],unit:'m',yTitle:'Depth (m)'};
   const rawMin=Math.min(...d), rawMax=Math.max(...d);
   const span=rawMax-rawMin;
-  const unit = type ? uncDepthUnit(type) : 'm';
+  const unit = type ? uncDepthUnit(type) : UNC_LAS_DEPTH_UNIT;
   const lbl = unit==='ft'?'ft':'m';
-  const toDisp = v => unit==='ft' ? v*UNC_M2FT : v;
-  const toM = v => unit==='ft' ? v*UNC_FT2M : v;
+  // Convert LAS-native DEPTH value → display unit
+  const toDisp = v => {
+    if(unit==='ft' && UNC_LAS_DEPTH_UNIT==='m') return v*UNC_M2FT;
+    if(unit==='m'  && UNC_LAS_DEPTH_UNIT==='ft') return v*UNC_FT2M;
+    return v;
+  };
+  // Convert display unit → LAS-native (Plotly tickvals must match DEPTH column)
+  const toNative = v => {
+    if(unit==='ft' && UNC_LAS_DEPTH_UNIT==='m') return v*UNC_FT2M;
+    if(unit==='m'  && UNC_LAS_DEPTH_UNIT==='ft') return v*UNC_M2FT;
+    return v;
+  };
 
   // Choose step in display units
   const dispSpan = toDisp(rawMax) - toDisp(rawMin);
@@ -397,10 +420,10 @@ function buildDepth(records, type){
   const ticks=[]; // in display units
   for(let v=dmin;v<=dmax;v+=step)ticks.push(v);
 
-  // Plot y-values are always in meters; tickvals must be in meters
-  const tickvalsM = ticks.map(toM);
-  const rangeM = [toM(dmax+step*0.1), toM(dmin-step*0.1)];
-  return{range:rangeM, tickvals:tickvalsM, ticktext:ticks.map(v=>v.toFixed(0)), unit:lbl, yTitle:`Depth (${lbl})`};
+  // tickvals must be in LAS-native unit (matching DEPTH column values)
+  const tickvalsNative = ticks.map(toNative);
+  const rangeNative = [toNative(dmax+step*0.1), toNative(dmin-step*0.1)];
+  return{range:rangeNative, tickvals:tickvalsNative, ticktext:ticks.map(v=>v.toFixed(0)), unit:lbl, yTitle:`Depth (${lbl})`};
 }
 
 // ── Generate smooth synthetic well-log uncertainty curves ──
@@ -821,6 +844,14 @@ function initUncertainty() {
           swBtn.textContent = '\u2699 Calculate Saturation Uncertainty';
         } else {
           populateSelect(swSel, [], null, '-- No saturation logs found --');
+        }
+        // Set depth unit from LAS file and auto-set selectors
+        if(data.depth_unit){
+          UNC_LAS_DEPTH_UNIT = data.depth_unit;
+          ['phiDepthUnit','swDepthUnit'].forEach(function(id){
+            const sel = document.getElementById(id);
+            if(sel) sel.value = data.depth_unit;
+          });
         }
         // Set depth range hints from server data if available
         if(data.depth_min!==undefined&&data.depth_max!==undefined){

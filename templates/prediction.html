@@ -422,22 +422,31 @@ function tableRows(tbodyId, rows, colDefs, colSpan){
 const M_TO_FT = 3.28084;
 const FT_TO_M = 1 / M_TO_FT;
 
+// Native depth unit of the loaded LAS file — set in initPrediction from /analysis-detail
+let PRED_LAS_DEPTH_UNIT = 'm';
+
 // State caches for full (unfiltered) rows per section
 const _predFullRows = {vsh: null, por: null, sat: null};
-// Track raw data depths (always stored in meters as returned by server)
+// Track raw data depths stored in LAS-native unit
 const _predDepthRange = {vsh: null, por: null, sat: null};
 
 function _predDepthUnit(section){
   const map = {vsh:'vshDepthUnit', por:'porDepthUnit', sat:'satDepthUnit'};
   const el = document.getElementById(map[section]);
-  return el ? el.value : 'm';
+  return el ? el.value : PRED_LAS_DEPTH_UNIT;
 }
 
-function _predConvertDepth(depthM, unit){
-  return unit === 'ft' ? depthM * M_TO_FT : depthM;
+// Convert a LAS-native depth value to the chosen display unit
+function _predConvertDepth(depthNative, unit){
+  if(unit === 'ft' && PRED_LAS_DEPTH_UNIT === 'm') return depthNative * M_TO_FT;
+  if(unit === 'm'  && PRED_LAS_DEPTH_UNIT === 'ft') return depthNative * FT_TO_M;
+  return depthNative; // same unit — no conversion
 }
-function _predConvertToM(depthDisplay, unit){
-  return unit === 'ft' ? depthDisplay * FT_TO_M : depthDisplay;
+// Convert a display-unit value back to LAS-native (for filtering against DEPTH column)
+function _predConvertToNative(depthDisplay, unit){
+  if(unit === 'ft' && PRED_LAS_DEPTH_UNIT === 'm') return depthDisplay * FT_TO_M;
+  if(unit === 'm'  && PRED_LAS_DEPTH_UNIT === 'ft') return depthDisplay * M_TO_FT;
+  return depthDisplay; // same unit — no conversion
 }
 
 function _predDepthLabel(unit){ return unit === 'ft' ? 'ft' : 'm'; }
@@ -448,17 +457,17 @@ function _predSetColHeader(section, unit){
   if(el) el.textContent = 'Depth (' + _predDepthLabel(unit) + ')';
 }
 
-function _predSetDepthHint(section, minM, maxM){
+function _predSetDepthHint(section, minNative, maxNative){
   const unit = _predDepthUnit(section);
-  const mn = _predConvertDepth(minM, unit).toFixed(1);
-  const mx = _predConvertDepth(maxM, unit).toFixed(1);
+  const mn = _predConvertDepth(minNative, unit).toFixed(1);
+  const mx = _predConvertDepth(maxNative, unit).toFixed(1);
   const hintMap = {vsh:'vshDepthHint', por:'porDepthHint', sat:'satDepthHint'};
   const el = document.getElementById(hintMap[section]);
   if(el) el.textContent = 'Data range: ' + mn + ' – ' + mx + ' ' + _predDepthLabel(unit);
 }
 
-function _predFmtDepthVal(depthM, unit){
-  const v = _predConvertDepth(depthM, unit);
+function _predFmtDepthVal(depthNative, unit){
+  const v = _predConvertDepth(depthNative, unit);
   return '<strong>' + v.toFixed(2) + '</strong>';
 }
 
@@ -468,13 +477,14 @@ function _predGetFilteredRows(section, rows){
   const maxMap = {vsh:'vshDepthMax', por:'porDepthMax', sat:'satDepthMax'};
   const minDisplay = parseFloat(document.getElementById(minMap[section]).value);
   const maxDisplay = parseFloat(document.getElementById(maxMap[section]).value);
-  const minM = isNaN(minDisplay) ? null : _predConvertToM(minDisplay, unit);
-  const maxM = isNaN(maxDisplay) ? null : _predConvertToM(maxDisplay, unit);
+  // Convert user input (display unit) to LAS-native unit for filtering
+  const minNative = isNaN(minDisplay) ? null : _predConvertToNative(minDisplay, unit);
+  const maxNative = isNaN(maxDisplay) ? null : _predConvertToNative(maxDisplay, unit);
   return rows.filter(r => {
     const d = Number(r.DEPTH);
     if(isNaN(d)) return false;
-    if(minM !== null && d < minM) return false;
-    if(maxM !== null && d > maxM) return false;
+    if(minNative !== null && d < minNative) return false;
+    if(maxNative !== null && d > maxNative) return false;
     return true;
   });
 }
@@ -873,6 +883,17 @@ async function initPrediction(){
     ALL_LOGS=detail.analysis.log_names||[];
     CURRENT_WELL_NAME = (detail.analysis.summary && detail.analysis.summary.well_name) ? detail.analysis.summary.well_name : (detail.analysis.well_name||'well');
     sessionStorage.setItem(_WELL_KEY, CURRENT_WELL_NAME);
+
+    // ── Auto-set depth unit from LAS file ──────────────────────────────────
+    const da = detail.analysis.depth_analysis || {};
+    const lasUnit = da.depth_unit || (detail.analysis.summary && detail.analysis.summary.depth_unit) || 'm';
+    PRED_LAS_DEPTH_UNIT = lasUnit;
+    // Set all three depth unit selectors to match the LAS file unit
+    ['vshDepthUnit','porDepthUnit','satDepthUnit'].forEach(id=>{
+      const sel = document.getElementById(id);
+      if(sel) sel.value = lasUnit;
+    });
+
     if(!ALL_LOGS.length){
       showStatus('⚠️ LAS file loaded but no log curves found. Please re-upload a valid LAS file.','warn');
       return;

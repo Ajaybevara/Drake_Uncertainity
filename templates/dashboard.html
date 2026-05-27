@@ -44,7 +44,16 @@ function keyLabel(k){return String(k).replace(/_/g,' ').replace(/\w/g,m=>m.toUp
 function kvHtml(obj){const entries=Object.entries(obj||{}); if(!entries.length) return '<div class="text-secondary">No results available.</div>'; return entries.map(([k,v])=>`<div class="d-flex justify-content-between border-bottom py-2 gap-3"><span class="text-secondary">${keyLabel(k)}</span><span class="text-end">${val(v)}</span></div>`).join('');}
 function renderWellInfo(info){document.getElementById('wellInfoPanel').innerHTML=kvHtml(info);}
 function renderSummary(summary){document.getElementById('summaryPanel').innerHTML=kvHtml(summary);}
-function renderDepth(depth){document.getElementById('depthPanel').innerHTML=kvHtml(depth);}
+function renderDepth(depth){
+  if(depth && depth.depth_unit){
+    const d2 = Object.assign({}, depth);
+    d2['Depth Unit'] = d2.depth_unit === 'ft' ? 'Feet (ft)' : 'Meters (m)';
+    delete d2.depth_unit;
+    document.getElementById('depthPanel').innerHTML=kvHtml(d2);
+  } else {
+    document.getElementById('depthPanel').innerHTML=kvHtml(depth);
+  }
+}
 function renderStats(stats){const entries=Object.entries(stats||{}); document.getElementById('statsPanel').innerHTML=entries.length?entries.map(([name,s])=>`<div class="border rounded p-3 mb-3"><div class="fw-semibold mb-2">${name}</div><div class="small text-secondary">Unit: ${val(s.unit)}</div><div class="small text-secondary">Description: ${val(s.description)}</div><div class="small text-secondary">Min: ${num(s.minimum ?? s.min)}</div><div class="small text-secondary">Max: ${num(s.maximum ?? s.max)}</div><div class="small text-secondary">Mean: ${num(s.mean)}</div><div class="small text-secondary">P10: ${num(s.p10)}</div><div class="small text-secondary">P50: ${num(s.p50)}</div><div class="small text-secondary">P90: ${num(s.p90)}</div><div class="small text-secondary">Valid Samples: ${val(s.valid_samples)}</div></div>`).join(''):'<div class="text-secondary">No log properties available.</div>';}
 function renderHistory(items){document.querySelector('#historyTable tbody').innerHTML=(items||[]).length?(items||[]).map(item=>`<tr><td>${val(item.file_name)}</td><td>${val(item.upload_time)}</td><td>${val(item.well_name)}</td><td>${val(item.total_logs)}</td><td>${val(item.analysis_date)}</td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-info" onclick="loadHistoryItem('${item.id}')">Open</button><button class="btn btn-sm btn-outline-danger" onclick="deleteHistoryItem('${item.id}')">Delete</button></div></td></tr>`).join(''):'<tr><td colspan="6" class="text-secondary text-center">No analysis history yet.</td></tr>';}
 async function refreshHistory(){const r=await fetch('/analysis-history'); const d=await r.json(); if(d.success) renderHistory(d.items||[]);}

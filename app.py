@@ -772,6 +772,27 @@ def parse_las_file(file_path: Path):
     depth_max = safe_float(df['DEPTH'].max())
     depth_step = safe_float(df['DEPTH'].diff().replace(0, np.nan).median())
 
+    # ── Extract depth unit from LAS file ──────────────────────────────────────
+    # Priority: STRT header unit > first curve (DEPT/DEPTH) unit > fallback 'm'
+    def _extract_depth_unit(las_obj):
+        # Try well header STRT unit
+        try:
+            u = str(getattr(las_obj.well, 'STRT').unit).strip().upper()
+            if u:
+                return 'ft' if u in ('F', 'FT', 'FEET', 'FOOT') else 'm'
+        except Exception:
+            pass
+        # Try first curve unit (usually DEPT or DEPTH)
+        try:
+            u = str(las_obj.curves[0].unit).strip().upper()
+            if u:
+                return 'ft' if u in ('F', 'FT', 'FEET', 'FOOT') else 'm'
+        except Exception:
+            pass
+        return 'm'  # LAS 2.0 default
+
+    depth_unit = _extract_depth_unit(las)
+
     available_logs = []
     stats_map = {}
     numeric_cols = []
@@ -870,14 +891,16 @@ def parse_las_file(file_path: Path):
         'missing_values': total_missing,
         'null_values': total_nulls,
         'file_size': file_path.stat().st_size,
-        'depth_range': f"{depth_min if depth_min is not None else 'N/A'} - {depth_max if depth_max is not None else 'N/A'}",
+        'depth_range': f"{depth_min if depth_min is not None else 'N/A'} - {depth_max if depth_max is not None else 'N/A'} ({depth_unit})",
         'well_name': well_name,
+        'depth_unit': depth_unit,
     }
     depth_analysis = {
         'start_depth': depth_min,
         'end_depth': depth_max,
         'step_size': depth_step,
         'total_samples': total_rows,
+        'depth_unit': depth_unit,
     }
 
     return to_builtin({
@@ -1193,6 +1216,7 @@ def uncertainty_logs():
             'default_sw_log': default_sw,
             'depth_min': item.get('start_depth'),
             'depth_max': item.get('end_depth'),
+            'depth_unit': item.get('depth_analysis', {}).get('depth_unit', 'm'),
         })
     except Exception as exc:
         return jsonify({'success': False, 'message': str(exc)}), 500
