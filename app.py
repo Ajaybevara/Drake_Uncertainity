@@ -597,6 +597,49 @@ def save_analysis_item(item):
     save_history_store(store)
 
 
+def normalize_las_file(file_path: Path) -> Path:
+    """
+    Some LAS files (e.g. dado1.las, dado2.las) store their data rows under
+    ~OTHER INFORMATION instead of the standard ~A / ~ASCII section.
+    lasio only recognises ~A, so it reads zero data rows from those files.
+
+    Handles two sub-variants:
+      1. ~OTHER header -> column-name row -> numeric data rows
+      2. ~OTHER header -> numeric data rows immediately (no column-name row)
+
+    Column-name row detection is broad: allows letters, digits, underscores and
+    whitespace, so names like LL8, CILD, SP, DRHO are all matched correctly.
+    The key discriminator is that a data row starts with optional whitespace
+    followed by an optional minus sign and then a digit.
+    """
+    import re
+
+    raw = file_path.read_text(encoding='utf-8', errors='replace')
+
+    # ~OTHER … line (mandatory)
+    # followed by an OPTIONAL column-name header line:
+    #   - starts with a letter (cannot be a data row)
+    #   - may contain letters, digits, underscores and whitespace (covers LL8, CILD, etc.)
+    # followed by the first numeric data row: spaces, optional -, digit
+    other_pattern = re.compile(
+        r'(~OTHER[^\n]*\n)'                     # ~OTHER header line  (group 1)
+        r'(?:[A-Za-z][A-Za-z0-9 _\t]*\n)?'      # optional column-name row (starts with letter)
+        r'(?=[ \t]*-?\d)',                       # lookahead: next content is a data row
+        re.IGNORECASE,
+    )
+
+    match = other_pattern.search(raw)
+    if not match:
+        return file_path            # already a standard LAS file – nothing to do
+
+    # Replace only the ~OTHER header line with ~A; keep column names + data intact
+    header_end = match.start(1) + len(match.group(1))
+    fixed = raw[:match.start(1)] + '~A\n' + raw[header_end:]
+
+    tmp = file_path.with_suffix('.las_tmp')
+    tmp.write_text(fixed, encoding='utf-8')
+    return tmp
+
 def build_quick_las_preview(file_path: Path, original_filename: str, user_email: str):
     preview = {
         'id': str(uuid.uuid4()),
@@ -618,7 +661,11 @@ def build_quick_las_preview(file_path: Path, original_filename: str, user_email:
         'is_preview': True,
     }
     try:
-        las = lasio.read(str(file_path), ignore_header_errors=True)
+        _norm_path = normalize_las_file(file_path)
+        las = lasio.read(str(_norm_path), ignore_header_errors=True)
+        if _norm_path != file_path and _norm_path.exists():
+            try: _norm_path.unlink()
+            except Exception: pass
         quick_info = {}
         for key, label in WELL_INFO_FIELDS:
             try:
@@ -658,17 +705,30 @@ def build_quick_las_preview(file_path: Path, original_filename: str, user_email:
 def parse_las_file(file_path: Path):
     if not file_path.exists() or file_path.stat().st_size == 0:
         raise ValueError('Empty file.')
+    _norm_path = normalize_las_file(file_path)
     try:
-        las = lasio.read(str(file_path), ignore_header_errors=False)
+        las = lasio.read(str(_norm_path), ignore_header_errors=False)
     except Exception as exc:
+        if _norm_path != file_path and _norm_path.exists():
+            try: _norm_path.unlink()
+            except Exception: pass
         raise ValueError(f'Corrupted LAS file or unsupported structure: {exc}')
     if not getattr(las, 'curves', None):
+        if _norm_path != file_path and _norm_path.exists():
+            try: _norm_path.unlink()
+            except Exception: pass
         raise ValueError('Missing headers or curves section in LAS file.')
 
     try:
         df = las.df().reset_index()
     except Exception as exc:
+        if _norm_path != file_path and _norm_path.exists():
+            try: _norm_path.unlink()
+            except Exception: pass
         raise ValueError(f'Unable to convert LAS to tabular data: {exc}')
+    if _norm_path != file_path and _norm_path.exists():
+        try: _norm_path.unlink()
+        except Exception: pass
     if df is None or df.empty:
         raise ValueError('LAS file contains no usable log samples.')
 
