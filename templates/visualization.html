@@ -316,15 +316,22 @@ async function initViewer(){
       const type=detectType(name);
       const props=TYPE_PROPS[type]||TYPE_PROPS.other;
       let xmin=props.xmin, xmax=props.xmax;
-      // Override with actual data range if available from summary
+      // Use actual unit from LAS file if available; fall back to type-default
+      let unit=props.unit;
       if(summaryRes.success&&summaryRes.summary){
         const s=summaryRes.summary.find(r=>r.curve===name);
-        if(s&&s.suggested_xmin!==null&&s.suggested_xmin!==undefined){
-          xmin=s.suggested_xmin;
-          xmax=s.suggested_xmax;
+        if(s){
+          if(s.suggested_xmin!==null&&s.suggested_xmin!==undefined){
+            xmin=s.suggested_xmin;
+            xmax=s.suggested_xmax;
+          }
+          // Prefer the actual LAS-file unit over the hardcoded type default
+          if(s.unit_las&&s.unit_las!=='N/A'&&s.unit_las.trim()!==''){
+            unit=s.unit_las.trim();
+          }
         }
       }
-      LOG_META[name]={type,xmin,xmax,scale:props.scale,unit:props.unit,color:props.color,reverse:props.reverse};
+      LOG_META[name]={type,xmin,xmax,scale:props.scale,unit,color:props.color,reverse:props.reverse};
     });
 
     // Capture depth range and unit from LAS file
@@ -641,9 +648,9 @@ function buildDepthAxis(rows){
 }
 
 // ══════════════════════════════════════════════════════════════
-//  LOG SCALE AXIS  — Clean petrophysical decade ticks
-//  Range: 0.2 → 2000 gives ticks: 0.2,0.3…0.9,1,2…9,10,20…100,200…1000,2000
-//  FIXED: no extra ticks outside range, no zoom explosion
+//  LOG SCALE AXIS  — Industry-standard petrophysical decade ticks
+//  Shows ONLY: 0.2, 1, 10, 100, 1000, 2000 style markers
+//  NOT 0.3, 0.4...0.9, 2, 3...9 sub-ticks on the axis labels
 // ══════════════════════════════════════════════════════════════
 function makeLogAxis(xmin, xmax, domainArr, titleStr){
   // Strict safe clamping
@@ -657,36 +664,57 @@ function makeLogAxis(xmin, xmax, domainArr, titleStr){
   const tickvals=[];
   const ticktext=[];
 
+  // Industry-standard: only decade boundary ticks (1, 10, 100, 1000)
+  // Plus the range endpoints (e.g., 0.2 at start, 2000 at end)
   for(let dec=decMin;dec<=decMax;dec++){
-    for(let m=1;m<=9;m++){
-      const v=m*Math.pow(10,dec);
-      // Only include if strictly within [sMin*0.999 , sMax*1.001]
-      if(v<sMin*0.999||v>sMax*1.001)continue;
-      tickvals.push(v);
-      // Format labels: always show for m==1 (decade marker); others smaller
-      if(dec<=-2) ticktext.push(v.toFixed(3));
-      else if(dec===-1) ticktext.push(v.toFixed(2));  // 0.20…0.90
-      else if(dec===0)  ticktext.push(v.toFixed(1));  // 1.0…9.0
-      else              ticktext.push(v.toFixed(0));  // 10,20…1000,2000
+    // Always add the decade boundary (m=1: 0.1, 1, 10, 100...)
+    const vDec = Math.pow(10, dec);
+    if(vDec >= sMin*0.999 && vDec <= sMax*1.001){
+      tickvals.push(vDec);
+      if(dec<=-2) ticktext.push(vDec.toFixed(3));
+      else if(dec===-1) ticktext.push(vDec.toFixed(1));
+      else if(dec===0)  ticktext.push('1');
+      else              ticktext.push(vDec.toFixed(0));
     }
   }
 
+  // Also add xmin and xmax if they're not already decade boundaries
+  // This shows the actual range limits (e.g., 0.2 and 2000)
+  const addEdge = (v) => {
+    if(v < sMin*0.999 || v > sMax*1.001) return;
+    // Check not already present (within 1% of an existing tick)
+    if(tickvals.some(t => Math.abs(t-v)/v < 0.01)) return;
+    // Find insertion position
+    let idx = tickvals.findIndex(t => t > v);
+    if(idx === -1) idx = tickvals.length;
+    tickvals.splice(idx, 0, v);
+    let lbl;
+    if(v < 0.01) lbl = v.toFixed(3);
+    else if(v < 0.1) lbl = v.toFixed(2);
+    else if(v < 1)   lbl = v.toFixed(1);
+    else if(v < 10)  lbl = v.toFixed(0);
+    else             lbl = v.toFixed(0);
+    ticktext.splice(idx, 0, lbl);
+  };
+  addEdge(sMin);
+  addEdge(sMax);
+
   return{
     domain:domainArr,
-    title:{text:titleStr,font:{size:9,color:'#7a5500'},standoff:6},
+    title:{text:titleStr,font:{size:9,color:'#7a5500'},standoff:4},
     type:'log',
     range:[Math.log10(sMin),Math.log10(sMax)],
     tickmode:'array',
     tickvals,
     ticktext,
     tickfont:{size:8,color:'#7a5500'},
-    side:'bottom',
+    side:'top',
     showgrid:true,
     gridcolor:'rgba(160,110,0,0.15)',
     showline:true,
     linecolor:'rgba(160,110,0,0.30)',
     zeroline:false,
-    fixedrange:false,   // allow user zoom on that axis only
+    fixedrange:false,
     automargin:true,
   };
 }
@@ -699,11 +727,11 @@ function makeLinAxis(xmin, xmax, domainArr, titleStr, color, reverse){
   if(lo===hi){lo=lo-1;hi=hi+1;}
   return{
     domain:domainArr,
-    title:{text:titleStr,font:{size:9,color:color||'#1a5080'},standoff:5},
+    title:{text:titleStr,font:{size:9,color:color||'#1a5080'},standoff:4},
     type:'linear',
     range:reverse?[hi,lo]:[lo,hi],
     tickfont:{size:8,color:color||'#1a5080'},
-    side:'bottom',
+    side:'top',
     showgrid:true,
     gridcolor:'rgba(26,80,180,0.10)',
     showline:true,
@@ -746,9 +774,9 @@ function buildChart(){
     paper_bgcolor:'rgba(248,251,255,1)',
     plot_bgcolor:'rgba(255,255,255,1)',
     font:{color:'#1a2540',size:10},
-    margin:{l:70,r:20,t:30,b:120},
+    margin:{l:70,r:20,t:80,b:40},
     showlegend:true,
-    legend:{orientation:'h',y:1.05,x:0,bgcolor:'rgba(255,255,255,0.9)',font:{size:10,color:'#1a2540'},bordercolor:'rgba(26,127,204,.15)',borderwidth:1},
+    legend:{orientation:'h',y:-0.05,x:0,bgcolor:'rgba(255,255,255,0.9)',font:{size:10,color:'#1a2540'},bordercolor:'rgba(26,127,204,.15)',borderwidth:1},
     // Shared Y axis (depth)
     yaxis:{
       title:{text:'Depth ('+(depthInfo.unit||'m')+')',font:{size:11,color:'#1a2540'}},
@@ -801,14 +829,28 @@ function buildChart(){
       .map(r=>Number(r[name]))
       .filter(v=>!isNaN(v) && isFinite(v) && (isLogScale ? v>0 : true));
 
+    // ── NPHI/neutron auto-unit detection ──
+    // If median of neutron values > 1.0, data is in percent → convert to fraction for display
+    const isNeutron = type==='neutron';
+    let neutronScale = 1.0; // multiply factor (1 = no change, 0.01 = percent→fraction)
+    if(isNeutron && validVals.length > 0){
+      const sorted = [...validVals].sort((a,b)=>a-b);
+      const median = sorted[Math.floor(sorted.length/2)];
+      if(median > 1.0){ neutronScale = 0.01; } // values in percent, convert to fraction
+    }
+
     let xmin=m.xmin;
     let xmax=m.xmax;
     // If meta range is null (rare 'other' type), use data range
     if(xmin===null||xmin===undefined){
-      xmin=validVals.length?Math.min(...validVals):0;
+      xmin=validVals.length?Math.min(...validVals)*neutronScale:0;
+    } else {
+      xmin = xmin; // already in fraction for neutron meta
     }
     if(xmax===null||xmax===undefined){
-      xmax=validVals.length?Math.max(...validVals):100;
+      xmax=validVals.length?Math.max(...validVals)*neutronScale:100;
+    } else {
+      xmax = xmax;
     }
     // For DRHO: if all values are within ±0.05 widen slightly for visibility
     if(isDrho && xmin===xmax){ xmin=-0.20; xmax=0.20; }
@@ -832,16 +874,16 @@ function buildChart(){
     });
 
     traces.push({
-      x:validRows.map(r=>Number(r[name])),
+      x:validRows.map(r=>Number(r[name])*neutronScale),
       y:validRows.map(r=>Number(r.DEPTH)),
       type:'scattergl',
       mode:'lines',
-      connectgaps:true,   // FIX: prevents gaps from isolated null points
+      connectgaps:true,
       name,
       xaxis:xRef,
       yaxis:yRef,
       line:{width:1.5,color:typeColor},
-      hovertemplate:`<b>${name}</b><br>Depth: %{y:.2f} m<br>Value: %{x:.4g} ${unit}<extra></extra>`,
+      hovertemplate:`<b>${name}</b><br>Depth: %{y:.2f} ${LAS_DEPTH_UNIT||'m'}<br>Value: %{x:.4g} ${neutronScale<1?'frac (converted from %)':unit}<extra></extra>`,
     });
   });
 

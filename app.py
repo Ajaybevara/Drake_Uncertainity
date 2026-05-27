@@ -196,7 +196,9 @@ def clean_numeric_series(df, col):
 
 
 def clip01(series):
-    return pd.to_numeric(series, errors='coerce').clip(0, 1)
+    s = pd.to_numeric(series, errors='coerce')
+    mask = s.isna()
+    return s.clip(0, 1).where(~mask, other=np.nan)
 
 
 def safe_sqrt(value):
@@ -222,13 +224,36 @@ def predict_vsh_ai(df):
 
 
 def predict_porosity_ai(df):
-    """Calculate total porosity from density log (Density Porosity method)."""
+    """Calculate total porosity from density log (Density Porosity method).
+    Industry standard: φ_D = (ρma - ρb) / (ρma - ρf)
+    Defaults: ρma = 2.65 g/cc (quartz sandstone), ρf = 1.0 g/cc (freshwater)
+    Physical validity: RHOB must be between 1.0 and 3.5 g/cc; outside = bad data → NaN.
+    """
     rhob_col = find_log_name(list(df.columns), ['RHOB','RHOZ','DEN','ZDEN'])
     if not rhob_col or rhob_col not in df.columns:
+        # Fallback: try neutron porosity if density not available
+        nphi_col = find_log_name(list(df.columns), ['NPHI','NPHIS','NPHISS','NPL','TNPH'])
+        if nphi_col and nphi_col in df.columns:
+            nphi = pd.to_numeric(df[nphi_col], errors='coerce').astype('float64')
+            nphi_valid = nphi.dropna()
+            if len(nphi_valid) > 0 and float(nphi_valid.median()) > 1.0:
+                nphi = nphi / 100.0  # percent to fraction
+            nphi_null = nphi.isna()
+            nphi_clipped = nphi.copy()
+            nphi_clipped[~nphi_null] = nphi[~nphi_null].clip(0.0, 1.0)
+            nphi_clipped[nphi_null] = np.nan
+            return nphi_clipped
         return pd.Series([np.nan] * len(df), index=df.index, dtype='float64')
     rhob = pd.to_numeric(df[rhob_col], errors='coerce').astype('float64')
-    rhoma, rhof = 2.65, 1.0
-    phit = ((rhoma - rhob) / (rhoma - rhof)).clip(0.0, 1.0)
+    # Physical validity guard: RHOB outside [1.0, 3.5] g/cc is a bad/null value
+    rhob = rhob.where((rhob >= 1.0) & (rhob <= 3.5), other=np.nan)
+    rhoma, rhof = 2.65, 1.0  # quartz sandstone, freshwater
+    rhob_null = rhob.isna()
+    phit_raw = (rhoma - rhob) / (rhoma - rhof)
+    phit_null = phit_raw.isna() | rhob_null
+    phit = phit_raw.copy()
+    phit[~phit_null] = phit_raw[~phit_null].clip(0.0, 1.0)
+    phit[phit_null] = np.nan
     return pd.to_numeric(phit, errors='coerce').astype('float64')
 
 
@@ -240,10 +265,21 @@ def predict_saturation_ai(df):
         return pd.Series([np.nan] * len(df), index=df.index, dtype='float64')
     rt = pd.to_numeric(df[rt_col], errors='coerce').astype('float64').where(lambda x: x > 0)
     phit = predict_porosity_ai(df)
-    phie = phit.clip(0.001, 1.0)
+    phie = phit.clip(0.001, 1.0).where(phit.notna(), other=np.nan)
+    rt_null = rt.isna()
+    phie_null = phie.isna()
     rw, a, m, n = 0.1, 1.0, 2.0, 2.0
-    sw = (((a * rw) / ((phie ** m) * rt)) ** (1.0 / n)).clip(0.0, 1.0)
-    sw = sw.replace([np.inf, -np.inf], np.nan)
+    sw_raw = (((a * rw) / ((phie ** m) * rt)) ** (1.0 / n))
+    sw_raw = sw_raw.replace([np.inf, -np.inf], np.nan)
+
+    # Same depth-wise low-PHIE guard used by the dashboard calculation.
+    phit_safe = phit.where(phit > 0)
+    sw_phit = (((a * rw) / ((phit_safe ** m) * rt)) ** (1.0 / n))
+    sw_phit = sw_phit.replace([np.inf, -np.inf], np.nan)
+    sw = sw_raw.copy()
+    sw[sw_raw > 1.0] = sw_phit[sw_raw > 1.0]
+    sw = sw.clip(0.0, 1.0)
+    sw = sw.where(~rt_null & ~phie_null, other=np.nan)
     return pd.to_numeric(sw, errors='coerce').astype('float64')
 
 
@@ -299,7 +335,7 @@ def compute_prediction_sections(item, config=None):
             'rhof': 1.0,
             'dtma': 55.5,
             'dtfl': 189.0,
-            'nphi_unit': 'fraction'
+            'nphi_unit': 'auto'
         },
         'saturation': {
             'method': 'archie',
@@ -366,12 +402,13 @@ def compute_prediction_sections(item, config=None):
     # Final case-insensitive column match
     gr_log_name = col_map.get(gr_log_name.upper(), gr_log_name)
     gr = clean_numeric_series(df, gr_log_name).astype('float64')
+    gr_null_mask = gr.isna()
     gr_min = safe_float(vcfg.get('gr_min'))
     gr_max = safe_float(vcfg.get('gr_max'))
     if gr_min is None and gr.notna().any(): gr_min = float(gr.min())
     if gr_max is None and gr.notna().any(): gr_max = float(gr.max())
     igr_raw = ((gr - gr_min) / ((gr_max - gr_min) if (gr_max is not None and gr_min is not None and gr_max != gr_min) else np.nan)).replace([np.inf, -np.inf], np.nan)
-    igr = pd.to_numeric(igr_raw, errors='coerce').astype('float64').clip(0.0, 1.0)
+    igr = pd.to_numeric(igr_raw, errors='coerce').astype('float64').clip(0.0, 1.0).where(~gr_null_mask, other=np.nan)
     method = str(vcfg.get('method', 'linear')).lower()
     if method == 'larionov_tertiary':
         vsh = pd.to_numeric(0.083 * ((2.0 ** (3.7 * igr)) - 1.0), errors='coerce').astype('float64')
@@ -385,8 +422,9 @@ def compute_prediction_sections(item, config=None):
         method = 'linear'
         vsh = igr.copy()
     out['GR'] = gr
-    out['IGR'] = igr.clip(0.0, 1.0)
-    out['VSH'] = pd.to_numeric(vsh, errors='coerce').astype('float64').clip(0.0, 1.0)
+    out['IGR'] = igr.clip(0.0, 1.0).where(~gr_null_mask, other=np.nan)
+    _vsh_clipped = pd.to_numeric(vsh, errors='coerce').astype('float64').clip(0.0, 1.0).where(~gr_null_mask, other=np.nan)
+    out['VSH'] = _vsh_clipped
 
     pcfg = defaults['porosity']
     phit = pd.Series([np.nan] * len(df), index=df.index, dtype='float64')
@@ -400,12 +438,25 @@ def compute_prediction_sections(item, config=None):
         return find_log_name(list(df.columns), candidates) or ''
     if pmethod == 'density':
         rhob = clean_numeric_series(df, _resolve_col('rhob_log', ['RHOB','RHOZ','DEN'])).astype('float64')
+        # Physical validity: RHOB outside [1.0, 3.5] g/cc is bad/null data
+        rhob = rhob.where((rhob >= 1.0) & (rhob <= 3.5), other=np.nan)
         rhoma = safe_float(pcfg.get('rhoma')) or 2.65
         rhof = safe_float(pcfg.get('rhof')) or 1.0
         phit = pd.to_numeric((rhoma - rhob) / ((rhoma - rhof) if rhoma != rhof else np.nan), errors='coerce').astype('float64')
     elif pmethod == 'neutron':
-        nphi = clean_numeric_series(df, _resolve_col('nphi_log', ['NPHI','NPHIS','NPHISS','NPL'])).astype('float64')
-        phit = (nphi / 100.0 if str(pcfg.get('nphi_unit', 'fraction')).lower() == 'percent' else nphi).astype('float64')
+        nphi_raw = clean_numeric_series(df, _resolve_col('nphi_log', ['NPHI','NPHIS','NPHISS','NPL'])).astype('float64')
+        # Auto-detect unit: if values typically >1, they're in percent → convert to fraction
+        _nphi_unit_cfg = str(pcfg.get('nphi_unit', 'auto')).lower()
+        if _nphi_unit_cfg == 'auto' or _nphi_unit_cfg == 'percent':
+            # If median of non-null values > 1, treat as percent
+            _nphi_valid = nphi_raw.dropna()
+            if len(_nphi_valid) > 0:
+                _nphi_median = float(_nphi_valid.median())
+                if _nphi_median > 1.0 or _nphi_unit_cfg == 'percent':
+                    nphi_raw = nphi_raw / 100.0
+        # Physical validity: NPHI fraction outside [-0.15, 1.0] is bad/null data
+        nphi_raw = nphi_raw.where((nphi_raw >= -0.15) & (nphi_raw <= 1.0), other=np.nan)
+        phit = nphi_raw.astype('float64')
     elif pmethod == 'sonic':
         dt = clean_numeric_series(df, _resolve_col('dt_log', ['DT','DTP','AC','SONIC'])).astype('float64')
         dtma = safe_float(pcfg.get('dtma')) or 55.5
@@ -413,18 +464,85 @@ def compute_prediction_sections(item, config=None):
         phit = pd.to_numeric((dt - dtma) / ((dtfl - dtma) if dtfl != dtma else np.nan), errors='coerce').astype('float64')
     elif pmethod == 'density_neutron':
         rhob = clean_numeric_series(df, _resolve_col('rhob_log', ['RHOB','RHOZ','DEN'])).astype('float64')
-        nphi = clean_numeric_series(df, _resolve_col('nphi_log', ['NPHI','NPHIS','NPHISS','NPL'])).astype('float64')
+        # Physical validity: RHOB outside [1.0, 3.5] g/cc is bad/null data
+        rhob = rhob.where((rhob >= 1.0) & (rhob <= 3.5), other=np.nan)
+        nphi_raw_dn = clean_numeric_series(df, _resolve_col('nphi_log', ['NPHI','NPHIS','NPHISS','NPL'])).astype('float64')
         rhoma = safe_float(pcfg.get('rhoma')) or 2.65
         rhof = safe_float(pcfg.get('rhof')) or 1.0
         phid = pd.to_numeric((rhoma - rhob) / ((rhoma - rhof) if rhoma != rhof else np.nan), errors='coerce').astype('float64')
-        phin = (nphi / 100.0 if str(pcfg.get('nphi_unit', 'fraction')).lower() == 'percent' else nphi).astype('float64')
-        # Correct industry-standard RMS (root-mean-square) average for density-neutron crossplot
-        phit = pd.to_numeric(np.sqrt((phid.fillna(0.0)**2 + phin.fillna(0.0)**2) / 2.0), errors='coerce').astype('float64')
-        # Propagate NaN where both inputs are NaN
-        both_nan = phid.isna() & phin.isna()
-        phit = phit.where(~both_nan, other=np.nan)
-    out['PHIT'] = pd.to_numeric(phit, errors='coerce').astype('float64').clip(0.0, 1.0)
-    out['PHIE'] = pd.to_numeric(out['PHIT'] * (1.0 - out['VSH'].astype('float64')), errors='coerce').astype('float64').clip(0.0, 1.0)
+        # Auto-detect NPHI unit
+        _nphi_unit_cfg2 = str(pcfg.get('nphi_unit', 'auto')).lower()
+        _nphi_valid_dn = nphi_raw_dn.dropna()
+        if len(_nphi_valid_dn) > 0:
+            _nphi_median_dn = float(_nphi_valid_dn.median())
+            if _nphi_median_dn > 1.0 or _nphi_unit_cfg2 == 'percent':
+                nphi_raw_dn = nphi_raw_dn / 100.0
+        # Physical validity: NPHI fraction outside [-0.15, 1.0] is bad/null data
+        nphi_raw_dn = nphi_raw_dn.where((nphi_raw_dn >= -0.15) & (nphi_raw_dn <= 1.0), other=np.nan)
+        phin = nphi_raw_dn.astype('float64')
+        # Industry-standard RMS average for density-neutron crossplot.
+        # CRITICAL: when one log is missing at a depth, fall back to the available log only
+        # (do NOT fill missing values with 0 — that fabricates a wrong porosity value).
+        phid_null = phid.isna()
+        phin_null = phin.isna()
+        both_valid = ~phid_null & ~phin_null
+        only_phid  = ~phid_null &  phin_null
+        only_phin  =  phid_null & ~phin_null
+        both_nan   =  phid_null &  phin_null
+        phit = pd.Series(np.nan, index=df.index, dtype='float64')
+        # Both valid → RMS average
+        phit[both_valid] = np.sqrt((phid[both_valid].values**2 + phin[both_valid].values**2) / 2.0)
+        # Only density valid → use density porosity directly
+        phit[only_phid] = phid[only_phid]
+        # Only neutron valid → use neutron porosity directly
+        phit[only_phin] = phin[only_phin]
+        # Both NaN → stays NaN (already initialised to NaN)
+        phit = pd.to_numeric(phit, errors='coerce').astype('float64')
+    # Preserve null where input rhob/nphi/dt was null (don't invent values)
+    _phit_raw = pd.to_numeric(phit, errors='coerce').astype('float64')
+    # Mask: NaN in the computed phit itself (from arithmetic on NaN inputs) OR NaN in source log
+    _computed_nan = _phit_raw.isna()
+    # Also build source-log NaN mask
+    if pmethod == 'density':
+        _rhob_col = _resolve_col('rhob_log', ['RHOB','RHOZ','DEN'])
+        _src_nan = clean_numeric_series(df, _rhob_col).isna()
+    elif pmethod == 'neutron':
+        _nphi_col = _resolve_col('nphi_log', ['NPHI','NPHIS','NPHISS','NPL'])
+        _src_nan = clean_numeric_series(df, _nphi_col).isna()
+    elif pmethod == 'sonic':
+        _dt_col = _resolve_col('dt_log', ['DT','DTP','AC','SONIC'])
+        _src_nan = clean_numeric_series(df, _dt_col).isna()
+    elif pmethod == 'density_neutron':
+        _rhob_col = _resolve_col('rhob_log', ['RHOB','RHOZ','DEN'])
+        _nphi_col = _resolve_col('nphi_log', ['NPHI','NPHIS','NPHISS','NPL'])
+        # NaN only where BOTH source logs are missing (single-log fallback is valid)
+        _src_nan = clean_numeric_series(df, _rhob_col).isna() & clean_numeric_series(df, _nphi_col).isna()
+    else:
+        _src_nan = pd.Series([False] * len(df), index=df.index)
+    # Combined NaN mask: NaN if source was NaN OR computed result was NaN
+    _any_nan = _computed_nan | _src_nan
+    # Clip only the non-NaN values; restore NaN everywhere else
+    _phit_clipped = _phit_raw.copy()
+    _phit_clipped[~_any_nan] = _phit_raw[~_any_nan].clip(0.0, 1.0)
+    _phit_clipped[_any_nan] = np.nan
+    _phit_raw = _phit_clipped
+    out['PHIT'] = _phit_raw
+    _vsh_safe = pd.to_numeric(out['VSH'], errors='coerce').astype('float64')
+    _phie_calc = _phit_raw * (1.0 - _vsh_safe)
+    _phie_raw = pd.to_numeric(_phie_calc, errors='coerce').astype('float64')
+    # Determine valid mask: PHIT valid AND VSH valid
+    _phit_valid = _phit_raw.notna()
+    _vsh_valid  = _vsh_safe.notna()
+    _phie_out = _phie_raw.copy()
+    # Where both valid: clip to [0,1]
+    _both_valid = _phit_valid & _vsh_valid
+    _phie_out[_both_valid] = _phie_raw[_both_valid].clip(0.0, 1.0)
+    # Where PHIT valid but VSH NaN: PHIE = PHIT (no Vsh correction)
+    _phit_only = _phit_valid & ~_vsh_valid
+    _phie_out[_phit_only] = _phit_raw[_phit_only]
+    # Where PHIT NaN: PHIE = NaN
+    _phie_out[~_phit_valid] = np.nan
+    out['PHIE'] = pd.Series(_phie_out, index=df.index, dtype='float64')
 
     scfg = defaults['saturation']
     _scol_map = {c.upper(): c for c in df.columns}
@@ -435,44 +553,98 @@ def compute_prediction_sections(item, config=None):
         _rt_name = find_log_name(list(df.columns), ['RT','RESD','ILD','LLD','AT90','HDRS','RDEP']) or ''
     rt = clean_numeric_series(df, _rt_name)
     rt = rt.where(rt > 0)
-    rw = safe_float(scfg.get('rw')) or 0.1
+    rw  = safe_float(scfg.get('rw'))  or 0.1
     rsh = safe_float(scfg.get('rsh')) or 2.0
-    a = safe_float(scfg.get('a')) or 1.0
-    m = safe_float(scfg.get('m')) or 2.0
-    n = safe_float(scfg.get('n')) or 2.0
+    a   = safe_float(scfg.get('a'))   or 1.0
+    m   = safe_float(scfg.get('m'))   or 2.0
+    n   = safe_float(scfg.get('n'))   or 2.0
+
     # Ensure VSH and PHIE are strictly float64 to avoid numpy ufunc type errors
-    vsh_f = pd.to_numeric(out['VSH'], errors='coerce').astype('float64')
+    vsh_f  = pd.to_numeric(out['VSH'],  errors='coerce').astype('float64')
     phie_f = pd.to_numeric(out['PHIE'], errors='coerce').astype('float64')
-    rt_f = pd.to_numeric(rt, errors='coerce').astype('float64')
-    phie_safe = phie_f.where(phie_f > 0)
-    sw_archie = (((a * rw) / ((phie_safe ** m) * rt_f)) ** (1.0 / n)).replace([np.inf, -np.inf], np.nan)
-    term_a = (vsh_f.fillna(0.0) ** (1.0 - vsh_f.fillna(0.0) / 2.0)) / float(np.sqrt(max(rsh, 1e-6)))
-    term_b = pd.Series(np.sqrt((phie_safe.fillna(0.0).values ** m) / max(a * rw, 1e-6)), index=df.index, dtype='float64')
-    sw_ind_raw = ((1.0 / np.sqrt(rt_f)) - term_a) / term_b.replace(0.0, np.nan)
+    rt_f   = pd.to_numeric(rt, errors='coerce').astype('float64')
+
+    # NaN masks — any NaN input → NaN output
+    rt_null   = rt_f.isna()
+    phie_null = phie_f.isna()
+
+    phie_safe = phie_f.where(phie_f > 0)  # avoids div-by-zero; keeps NaN for null rows
+
+    # ── Archie: Sw = ((a * Rw) / (PHIE^m * Rt))^(1/n)  ──────────────────
+    sw_archie_raw = (((a * rw) / ((phie_safe ** m) * rt_f)) ** (1.0 / n))
+    sw_archie_raw = sw_archie_raw.replace([np.inf, -np.inf], np.nan)
+
+    # Depth-wise guard for low-effective-porosity intervals:
+    # Archie can mathematically exceed 1.0 when PHIE becomes very small,
+    # which previously created a false flat 100% Sw plateau after that depth.
+    # Keep normal PHIE-based Archie values where they are physical (<=1).
+    # Only for over-limit rows, recalculate that same depth using PHIT as a
+    # fallback porosity so the curve remains depth-varying instead of being
+    # hard-clipped to 1.0. Nulls are still preserved.
+    phit_f = pd.to_numeric(out['PHIT'], errors='coerce').astype('float64')
+    phit_safe = phit_f.where(phit_f > 0)
+    sw_archie_phit = (((a * rw) / ((phit_safe ** m) * rt_f)) ** (1.0 / n))
+    sw_archie_phit = sw_archie_phit.replace([np.inf, -np.inf], np.nan)
+
+    sw_archie = sw_archie_raw.copy()
+    _over_limit = sw_archie_raw > 1.0
+    sw_archie[_over_limit] = sw_archie_phit[_over_limit]
+    sw_archie = sw_archie.clip(0.0, 1.0).where(~rt_null & ~phie_null, other=np.nan)
+
+    # ── Indonesia (Poupon-Leveaux, 1971):
+    #   1/√Rt = Vsh^(1−Vsh/2) / √Rsh  +  √(PHIE^m / (a×Rw)) × Sw^(n/2)
+    #   Solving for Sw:
+    #   term_conductance = 1/√Rt
+    #   term_shale       = Vsh^(1−Vsh/2) / √Rsh
+    #   term_pore_coeff  = √(PHIE^m / (a×Rw))
+    #   Sw^(n/2) = (term_conductance − term_shale) / term_pore_coeff
+    #   Sw = max(0, (term_conductance − term_shale) / term_pore_coeff) ^ (2/n)
+    vsh_safe = vsh_f.fillna(0.0).clip(0.0, 1.0)
+    rsh_safe = max(float(rsh), 1e-6)
+    rw_safe  = max(float(a * rw), 1e-6)
+
+    term_conductance = pd.Series(
+        np.where(rt_f.values > 0, 1.0 / np.sqrt(rt_f.values), np.nan),
+        index=df.index, dtype='float64'
+    )
+    term_shale = (vsh_safe ** (1.0 - vsh_safe / 2.0)) / np.sqrt(rsh_safe)
+
+    _phie_m = phie_safe ** m
+    _phie_m_safe = _phie_m.where(_phie_m.notna() & (_phie_m > 0))
+    term_pore_coeff = pd.Series(
+        np.sqrt(np.where(_phie_m_safe.notna(), _phie_m_safe.values / rw_safe, np.nan)),
+        index=df.index, dtype='float64'
+    )
+
+    sw_ind_raw = (term_conductance - term_shale) / term_pore_coeff.replace(0.0, np.nan)
     sw_ind_raw = pd.to_numeric(sw_ind_raw, errors='coerce').astype('float64')
-    sw_ind = (sw_ind_raw.clip(lower=0.0) ** (2.0 / n))
-    sw_ind = sw_ind.replace([np.inf, -np.inf], np.nan)
+    # Sw = max(0, X)^(2/n) — negative values mean Sw → 0 (over-estimated shale conductance)
+    sw_ind_clipped = sw_ind_raw.clip(lower=0.0)
+    sw_ind = (sw_ind_clipped ** (2.0 / n)).replace([np.inf, -np.inf], np.nan)
+    sw_ind = sw_ind.clip(0.0, 1.0).where(~rt_null & ~phie_null, other=np.nan)
+
     smethod = str(scfg.get('method', 'archie')).lower()
     sat_method = []
-    sw_values = []
+    sw_values  = []
     for i in range(len(df)):
-        v = vsh_f.iloc[i]
-        sa = sw_archie.iloc[i]
-        si = sw_ind.iloc[i]
-        active = smethod
-        val = sa
+        v_i  = vsh_f.iloc[i]
+        sa   = sw_archie.iloc[i]
+        si   = sw_ind.iloc[i]
         if smethod == 'indonesia':
-            active = 'indonesia'; val = si
+            active = 'Indonesia'; val = si
         elif smethod == 'auto':
-            if pd.notna(v) and v <= 0.15:
-                active = 'archie'; val = sa
+            if pd.notna(v_i) and v_i <= 0.15:
+                active = 'Archie'; val = sa
             else:
-                active = 'indonesia'; val = si
-        else:
-            active = 'archie'; val = sa
-        sat_method.append(active.title())
+                active = 'Indonesia'; val = si
+        else:  # default: archie
+            active = 'Archie'; val = sa
+        sat_method.append(active)
         sw_values.append(val)
-    out['SW'] = clip01(pd.Series(sw_values, index=df.index, dtype='float64'))
+
+    _sw_series = pd.Series(sw_values, index=df.index, dtype='float64')
+    # Final NaN propagation — no RT = no valid Sw
+    out['SW'] = _sw_series.where(~rt_null, other=np.nan)
     out['SATURATION_METHOD'] = sat_method
 
     lcfg = defaults['lithology']
@@ -1031,6 +1203,10 @@ def upload_file():
         save_path.unlink(missing_ok=True)
         return jsonify({'success': False, 'message': 'Empty file.'}), 400
 
+    # Clear old session analysis so new upload takes effect immediately
+    session.pop('analysis_id', None)
+    session.pop('las_path', None)
+
     task_id = str(uuid.uuid4())
     set_task(task_id, {
         'status': 'queued',
@@ -1521,7 +1697,8 @@ def analysis_history():
             'well_name': x.get('well_name'),
             'total_logs': x.get('total_logs'),
         }
-        for x in store.get('items', []) if x.get('user_email') == session.get('user_email')
+        for x in store.get('items', [])
+        if x.get('user_email') == session.get('user_email') and not x.get('is_preview', False)
     ])
     return jsonify({'success': True, 'items': to_builtin(items)})
 
@@ -1853,53 +2030,58 @@ def generate_ai_log_interpretation(log_summary, log_names):
 def calculate_porosity_uncertainty(phi_p50, method='fixed', uncertainty_value=0.03,
                                    pct=0.10, measured=None):
     phi_p50 = np.array(phi_p50, dtype=float)
+    nan_mask = np.isnan(phi_p50)
+    phi_safe = np.where(nan_mask, 0.0, phi_p50)  # temp fill for spread; NaN restored at end
     if method == 'residual' and measured is not None:
         measured = np.array(measured, dtype=float)
         residuals = measured - phi_p50
         sigma = float(np.nanstd(residuals))
         spread = 1.2816 * sigma  # scalar
     elif method == 'percent':
-        spread = phi_p50 * float(pct)  # per-depth array
+        spread = phi_safe * float(pct)  # per-depth array (NaN-safe via phi_safe)
     else:
-        # 'fixed' mode: use a per-depth spread that scales with value
-        # Base spread = uncertainty_value, but vary it by ±30% relative to local value
-        # so curves are not flat. Minimum spread = 0.5 * uncertainty_value.
+        # 'fixed' mode: vary spread proportionally to local value deviation from mean
         base = float(uncertainty_value)
-        phi_safe = np.where(np.isnan(phi_p50), 0.15, phi_p50)
         phi_mean = float(np.nanmean(phi_safe)) if np.nanmean(phi_safe) > 0 else 0.15
-        # spread varies proportionally to local phi deviation from mean
         deviation = np.abs(phi_safe - phi_mean) / (phi_mean + 1e-6)
         spread = base * (1.0 + deviation)  # per-depth array
-    phi_p10 = np.clip(phi_p50 - spread, 0, 1)
-    phi_p90 = np.clip(phi_p50 + spread, 0, 1)
+    phi_p10 = np.where(nan_mask, np.nan, np.clip(phi_p50 - spread, 0, 1))
+    phi_p90 = np.where(nan_mask, np.nan, np.clip(phi_p50 + spread, 0, 1))
     return phi_p10, phi_p50, phi_p90
 
 
 def calculate_saturation_uncertainty(sw_p50, method='fixed', uncertainty_value=0.05,
                                      pct=0.10, measured=None):
     sw_p50 = np.array(sw_p50, dtype=float)
+    nan_mask = np.isnan(sw_p50)
+    sw_safe = np.where(nan_mask, 0.0, sw_p50)  # temp fill; NaN restored at end
     if method == 'residual' and measured is not None:
         measured = np.array(measured, dtype=float)
         residuals = measured - sw_p50
         sigma = float(np.nanstd(residuals))
         spread = 1.2816 * sigma  # scalar
     elif method == 'percent':
-        spread = sw_p50 * float(pct)  # per-depth array
+        spread = sw_safe * float(pct)  # per-depth array (NaN-safe via sw_safe)
     else:
         # 'fixed' mode: vary spread per-depth proportionally to local sw deviation
         base = float(uncertainty_value)
-        sw_safe = np.where(np.isnan(sw_p50), 0.5, sw_p50)
         sw_mean = float(np.nanmean(sw_safe)) if np.nanmean(sw_safe) > 0 else 0.5
         deviation = np.abs(sw_safe - sw_mean) / (sw_mean + 1e-6)
         spread = base * (1.0 + deviation)  # per-depth array
-    sw_p10 = np.clip(sw_p50 - spread, 0, 1)
-    sw_p90 = np.clip(sw_p50 + spread, 0, 1)
+    sw_p10 = np.where(nan_mask, np.nan, np.clip(sw_p50 - spread, 0, 1))
+    sw_p90 = np.where(nan_mask, np.nan, np.clip(sw_p50 + spread, 0, 1))
     return sw_p10, sw_p50, sw_p90
 
 
 def interpret_uncertainty_results(p10_arr, p50_arr, p90_arr, kind='porosity'):
-    spreads = np.array(p90_arr) - np.array(p10_arr)
-    mean_spread = float(np.nanmean(spreads))
+    def _to_arr(lst):
+        return np.array([v if v is not None else np.nan for v in lst], dtype=float)
+    p10 = _to_arr(p10_arr); p90 = _to_arr(p90_arr)
+    spreads = p90 - p10
+    valid = ~np.isnan(spreads)
+    if not valid.any():
+        return [f"📊 No valid {kind} uncertainty data computed."]
+    mean_spread = float(np.nanmean(spreads[valid]))
     max_spread_idx = int(np.nanargmax(spreads))
     min_spread_idx = int(np.nanargmin(spreads))
     msgs = []
@@ -2023,7 +2205,7 @@ def las_log_data():
         if cm['log_type'] == 'neutron':
             mx = s.get('maximum')
             if mx is not None and float(mx) > 1:
-                warnings_list.append(f"{c}: Values appear to be in percent (max={mx}). Consider converting to fraction by dividing by 100.")
+                warnings_list.append(f"{c}: Values appear to be in percent (max={mx}). Visualization automatically converts to fraction (÷100) for display. For AI Prediction porosity calculations this is also handled automatically.")
         if cm['log_type'] == 'gamma_ray':
             mx = s.get('maximum')
             if mx is not None and float(mx) > 200:
@@ -2076,9 +2258,9 @@ def compute_uncertainty():
 
         # ── POROSITY UNCERTAINTY ──
         phi_col = payload.get('phi_col', '')
-        phi_method = payload.get('phi_method', 'percent')   # default percent for varying spread
+        phi_method = payload.get('phi_method', 'percent')   # percent gives meaningful per-depth spread
         phi_unc = float(payload.get('phi_unc', 0.03))
-        phi_pct = float(payload.get('phi_pct', 0.10))
+        phi_pct = float(payload.get('phi_pct', 0.12))       # 12% spread for porosity
         phi_meas_col = payload.get('phi_meas_col', '')
 
         # Always compute prediction sections first to get real PHIT/SW values
@@ -2113,8 +2295,8 @@ def compute_uncertainty():
                         phi_src = candidate
                         break
         if phi_src is None or phi_src.isna().all():
-            # final fallback
-            phi_src = pd.Series([0.15] * len(df), dtype=float)
+            # No log data found — keep as NaN so uncertainty curves are blank where no log exists
+            phi_src = pd.Series([np.nan] * len(df), dtype=float)
 
         phi_measured = None
         if phi_meas_col and phi_meas_col.upper() in {c.upper() for c in df.columns}:
@@ -2123,15 +2305,15 @@ def compute_uncertainty():
                 phi_measured = pd.to_numeric(df[real_pm], errors='coerce').values
 
         p10_phi, p50_phi, p90_phi = calculate_porosity_uncertainty(
-            phi_src.fillna(phi_src.median()).values,
+            phi_src.values,
             method=phi_method, uncertainty_value=phi_unc, pct=phi_pct, measured=phi_measured
         )
 
         # ── SATURATION UNCERTAINTY ──
         sw_col = payload.get('sw_col', '')
-        sw_method = payload.get('sw_method', 'percent')     # default percent for varying spread
+        sw_method = payload.get('sw_method', 'percent')     # percent gives meaningful per-depth spread
         sw_unc = float(payload.get('sw_unc', 0.05))
-        sw_pct = float(payload.get('sw_pct', 0.10))
+        sw_pct = float(payload.get('sw_pct', 0.15))         # 15% spread for saturation
         sw_meas_col = payload.get('sw_meas_col', '')
 
         sw_src = None
@@ -2159,7 +2341,8 @@ def compute_uncertainty():
                         sw_src = candidate
                         break
         if sw_src is None or sw_src.isna().all():
-            sw_src = pd.Series([0.50] * len(df), dtype=float)
+            # No log data found — keep as NaN so uncertainty curves are blank where no log exists
+            sw_src = pd.Series([np.nan] * len(df), dtype=float)
 
         sw_measured = None
         if sw_meas_col and sw_meas_col.upper() in {c.upper() for c in df.columns}:
@@ -2168,7 +2351,7 @@ def compute_uncertainty():
                 sw_measured = pd.to_numeric(df[real_sm], errors='coerce').values
 
         p10_sw, p50_sw, p90_sw = calculate_saturation_uncertainty(
-            sw_src.fillna(sw_src.median()).values,
+            sw_src.values,
             method=sw_method, uncertainty_value=sw_unc, pct=sw_pct, measured=sw_measured
         )
 
@@ -2181,8 +2364,8 @@ def compute_uncertainty():
             arr = np.array(arr, dtype=float)
             if len(arr) >= n:
                 return arr[:n]
-            # pad with last value if shorter (e.g. from prediction sections)
-            pad = np.full(n - len(arr), arr[-1] if len(arr) > 0 else np.nan)
+            # pad with NaN if shorter (do NOT repeat last value — that fabricates data)
+            pad = np.full(n - len(arr), np.nan)
             return np.concatenate([arr, pad])
 
         p10_phi = _align(p10_phi, n_raw)
@@ -2195,6 +2378,14 @@ def compute_uncertainty():
         phi_spread = p90_phi - p10_phi
         sw_spread  = p90_sw  - p10_sw
 
+        def _float_or_none(v):
+            """Return None for NaN/inf, float otherwise."""
+            try:
+                f = float(v)
+                return None if (np.isnan(f) or np.isinf(f)) else f
+            except Exception:
+                return None
+
         # Build raw records
         raw_records = []
         for i in range(n_raw):
@@ -2203,10 +2394,14 @@ def compute_uncertainty():
                 continue
             raw_records.append({
                 'DEPTH': float(d),
-                'PHI_P10': float(p10_phi[i]), 'PHI_P50': float(p50_phi[i]), 'PHI_P90': float(p90_phi[i]),
-                'PHI_UNCERTAINTY_SPREAD': float(phi_spread[i]),
-                'SW_P10':  float(p10_sw[i]),  'SW_P50':  float(p50_sw[i]),  'SW_P90':  float(p90_sw[i]),
-                'SW_UNCERTAINTY_SPREAD':  float(sw_spread[i]),
+                'PHI_P10': _float_or_none(p10_phi[i]),
+                'PHI_P50': _float_or_none(p50_phi[i]),
+                'PHI_P90': _float_or_none(p90_phi[i]),
+                'PHI_UNCERTAINTY_SPREAD': _float_or_none(phi_spread[i]),
+                'SW_P10':  _float_or_none(p10_sw[i]),
+                'SW_P50':  _float_or_none(p50_sw[i]),
+                'SW_P90':  _float_or_none(p90_sw[i]),
+                'SW_UNCERTAINTY_SPREAD':  _float_or_none(sw_spread[i]),
             })
 
         # Sort by depth ascending so lines render correctly (no zigzag)
@@ -2214,19 +2409,22 @@ def compute_uncertainty():
 
         n = len(raw_records)
 
+        def _rnd(v, d):
+            return round(v, d) if v is not None else None
+
         # Round for JSON output
         records = []
         for r in raw_records:
             records.append({
-                'DEPTH': to_builtin(round(r['DEPTH'], 2)),
-                'PHI_P10': to_builtin(round(r['PHI_P10'], 5)),
-                'PHI_P50': to_builtin(round(r['PHI_P50'], 5)),
-                'PHI_P90': to_builtin(round(r['PHI_P90'], 5)),
-                'PHI_UNCERTAINTY_SPREAD': to_builtin(round(r['PHI_UNCERTAINTY_SPREAD'], 5)),
-                'SW_P10':  to_builtin(round(r['SW_P10'],  5)),
-                'SW_P50':  to_builtin(round(r['SW_P50'],  5)),
-                'SW_P90':  to_builtin(round(r['SW_P90'],  5)),
-                'SW_UNCERTAINTY_SPREAD':  to_builtin(round(r['SW_UNCERTAINTY_SPREAD'],  5)),
+                'DEPTH': to_builtin(_rnd(r['DEPTH'], 2)),
+                'PHI_P10': to_builtin(_rnd(r['PHI_P10'], 5)),
+                'PHI_P50': to_builtin(_rnd(r['PHI_P50'], 5)),
+                'PHI_P90': to_builtin(_rnd(r['PHI_P90'], 5)),
+                'PHI_UNCERTAINTY_SPREAD': to_builtin(_rnd(r['PHI_UNCERTAINTY_SPREAD'], 5)),
+                'SW_P10':  to_builtin(_rnd(r['SW_P10'],  5)),
+                'SW_P50':  to_builtin(_rnd(r['SW_P50'],  5)),
+                'SW_P90':  to_builtin(_rnd(r['SW_P90'],  5)),
+                'SW_UNCERTAINTY_SPREAD':  to_builtin(_rnd(r['SW_UNCERTAINTY_SPREAD'],  5)),
             })
 
         # Extract sorted depth/value arrays from final records for stats
@@ -2240,16 +2438,27 @@ def compute_uncertainty():
         sorted_phi_spread = [r['PHI_UNCERTAINTY_SPREAD'] for r in raw_records]
         sorted_sw_spread  = [r['SW_UNCERTAINTY_SPREAD']  for r in raw_records]
 
+        # Convert None→NaN for numpy operations
+        def _to_float_arr(lst):
+            return np.array([v if v is not None else np.nan for v in lst], dtype=float)
+
+        _phi_spread_arr = _to_float_arr(sorted_phi_spread)
+        _sw_spread_arr  = _to_float_arr(sorted_sw_spread)
+        _phi_p50_arr    = _to_float_arr(sorted_phi_p50)
+        _sw_p50_arr     = _to_float_arr(sorted_sw_p50)
+
         phi_interp = interpret_uncertainty_results(sorted_phi_p10, sorted_phi_p50, sorted_phi_p90, 'porosity')
         sw_interp  = interpret_uncertainty_results(sorted_sw_p10,  sorted_sw_p50,  sorted_sw_p90,  'saturation')
 
-        avg_phi_p50    = float(np.nanmean(sorted_phi_p50))   if sorted_phi_p50  else 0.0
-        avg_phi_spread = float(np.nanmean(sorted_phi_spread)) if sorted_phi_spread else 0.0
-        avg_sw_p50     = float(np.nanmean(sorted_sw_p50))    if sorted_sw_p50   else 0.0
-        avg_sw_spread  = float(np.nanmean(sorted_sw_spread))  if sorted_sw_spread else 0.0
+        avg_phi_p50    = float(np.nanmean(_phi_p50_arr))    if not np.all(np.isnan(_phi_p50_arr))    else 0.0
+        avg_phi_spread = float(np.nanmean(_phi_spread_arr)) if not np.all(np.isnan(_phi_spread_arr)) else 0.0
+        avg_sw_p50     = float(np.nanmean(_sw_p50_arr))     if not np.all(np.isnan(_sw_p50_arr))     else 0.0
+        avg_sw_spread  = float(np.nanmean(_sw_spread_arr))  if not np.all(np.isnan(_sw_spread_arr))  else 0.0
 
-        max_phi_depth = sorted_depths[int(np.nanargmax(sorted_phi_spread))] if sorted_phi_spread else None
-        max_sw_depth  = sorted_depths[int(np.nanargmax(sorted_sw_spread))]  if sorted_sw_spread  else None
+        phi_valid_idx = np.where(~np.isnan(_phi_spread_arr))[0]
+        sw_valid_idx  = np.where(~np.isnan(_sw_spread_arr))[0]
+        max_phi_depth = sorted_depths[int(phi_valid_idx[np.argmax(_phi_spread_arr[phi_valid_idx])])] if len(phi_valid_idx) > 0 else None
+        max_sw_depth  = sorted_depths[int(sw_valid_idx[np.argmax(_sw_spread_arr[sw_valid_idx])])]   if len(sw_valid_idx)  > 0 else None
 
         return jsonify({
             'success': True,
@@ -2319,34 +2528,31 @@ def download_uncertainty_csv(kind):
                 sw_values = pd.to_numeric(df_raw[match], errors='coerce').values
                 break
 
-    # Fill NaN with median so uncertainty functions receive clean arrays
-    phi_med = float(np.nanmedian(phi_values)) if not np.all(np.isnan(phi_values)) else 0.15
-    sw_med  = float(np.nanmedian(sw_values))  if not np.all(np.isnan(sw_values))  else 0.50
-    phi_clean = np.where(np.isnan(phi_values), phi_med, phi_values)
-    sw_clean  = np.where(np.isnan(sw_values),  sw_med,  sw_values)
-
-    # Compute uncertainty using percent method so spread varies per depth
+    # Compute uncertainty — NaN inputs produce NaN P10/P50/P90 (preserved, not filled)
     p10_phi, p50_phi, p90_phi = calculate_porosity_uncertainty(
-        phi_clean, method='percent', pct=0.10)
+        phi_values, method='percent', pct=0.10)
     p10_sw, p50_sw, p90_sw = calculate_saturation_uncertainty(
-        sw_clean, method='percent', pct=0.10)
+        sw_values, method='percent', pct=0.10)
 
     if kind == 'porosity':
         depth_out = phi_depth
+        # Only include rows where depth is valid; NaN PHIT rows get NaN P50 (correct)
         mask = ~np.isnan(depth_out.astype(float))
+        phi_spread = np.where(np.isnan(p10_phi) | np.isnan(p90_phi), np.nan, p90_phi - p10_phi)
         df_out = pd.DataFrame({
             'DEPTH':   depth_out[mask],
             'PHI_P10': p10_phi[mask], 'PHI_P50': p50_phi[mask], 'PHI_P90': p90_phi[mask],
-            'PHI_UNCERTAINTY_SPREAD': (p90_phi - p10_phi)[mask]
+            'PHI_UNCERTAINTY_SPREAD': phi_spread[mask]
         })
         fname = 'drakeai_porosity_uncertainty.csv'
     else:
         depth_out = sw_depth
         mask = ~np.isnan(depth_out.astype(float))
+        sw_spread = np.where(np.isnan(p10_sw) | np.isnan(p90_sw), np.nan, p90_sw - p10_sw)
         df_out = pd.DataFrame({
             'DEPTH':  depth_out[mask],
             'SW_P10': p10_sw[mask], 'SW_P50': p50_sw[mask], 'SW_P90': p90_sw[mask],
-            'SW_UNCERTAINTY_SPREAD': (p90_sw - p10_sw)[mask]
+            'SW_UNCERTAINTY_SPREAD': sw_spread[mask]
         })
         fname = 'drakeai_saturation_uncertainty.csv'
 

@@ -493,23 +493,20 @@ function _predRenderTable(section, rows){
   const unit = _predDepthUnit(section);
   _predSetColHeader(section, unit);
   if(section === 'vsh'){
-    const valid = rows.filter(r=>r.GR!==null&&r.GR!==undefined&&r.VSH!==null&&r.VSH!==undefined).slice(0,500);
-    tableRows('vshBody', valid, [
+    tableRows('vshBody', rows.slice(0,500), [
       r=>`<td>${_predFmtDepthVal(r.DEPTH,unit)}</td>`,
       r=>`<td>${fmtNum(r.GR,2)}</td>`,
       r=>`<td>${fmtNum(r.IGR,4)}</td>`,
       r=>`<td>${fmtVSH(r.VSH)}</td>`
     ], 5);
   } else if(section === 'por'){
-    const valid = rows.filter(r=>r.PHIT!==null&&r.PHIT!==undefined&&!isNaN(Number(r.PHIT))).slice(0,500);
-    tableRows('porosityBody', valid, [
+    tableRows('porosityBody', rows.slice(0,500), [
       r=>`<td>${_predFmtDepthVal(r.DEPTH,unit)}</td>`,
       r=>`<td>${fmtNum(r.PHIT,4)}</td>`,
       r=>`<td>${fmtNum(r.PHIE,4)}</td>`
     ], 4);
   } else if(section === 'sat'){
-    const valid = rows.filter(r=>r.SW!==null&&r.SW!==undefined&&!isNaN(Number(r.SW))).slice(0,500);
-    tableRows('saturationBody', valid, [
+    tableRows('saturationBody', rows.slice(0,500), [
       r=>`<td>${_predFmtDepthVal(r.DEPTH,unit)}</td>`,
       r=>`<td>${fmtNum(r.RT,3)}</td>`,
       r=>`<td>${fmtSW(r.SW)}</td>`,
@@ -642,7 +639,7 @@ async function runVsh(){
       }
     }
 
-    const validRows = rows.filter(r => r.GR !== null && r.GR !== undefined && r.VSH !== null && r.VSH !== undefined).slice(0, 5);
+    const validRows = rows.slice(0, 500);
     _predRenderTable('vsh', validRows);
 
     renderStats('vshResultStats',[
@@ -684,7 +681,7 @@ async function runPorosity(){
         : '';
     }
 
-    const validPorRows = rows.filter(r => r.PHIT !== null && r.PHIT !== undefined && !isNaN(Number(r.PHIT))).slice(0, 5);
+    const validPorRows = rows.slice(0, 500);
     _predRenderTable('por', validPorRows);
 
     renderStats('porResultStats',[
@@ -719,7 +716,7 @@ async function runSaturation(){
     const rows=data.saturation_table||[];
     _predShowControls('sat', rows);
 
-    const validSatRows = rows.filter(r => r.SW !== null && r.SW !== undefined && !isNaN(Number(r.SW))).slice(0, 5);
+    const validSatRows = rows.slice(0, 500);
     _predRenderTable('sat', validSatRows);
 
     renderStats('satResultStats',[

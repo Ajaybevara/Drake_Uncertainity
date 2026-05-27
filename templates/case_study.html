@@ -502,7 +502,7 @@ function renderPhiChart(records, depthAx){
       x: p10_vals, y: depths,
       type:'scatter', mode:'lines', name:'P10 (Optimistic)',
       line:{width:2.2, dash:'dot', color:'#E65100'},
-      connectgaps:true,
+      connectgaps:false,
       hovertemplate:'<b>Depth:</b> %{y:.1f} m<br><b>PHI P10:</b> %{x:.4f}<extra></extra>'
     },
     // P50 — blue solid (best estimate)
@@ -510,7 +510,7 @@ function renderPhiChart(records, depthAx){
       x: p50_vals, y: depths,
       type:'scatter', mode:'lines', name:'P50 (Best Estimate)',
       line:{width:2.8, dash:'solid', color:'#1565C0'},
-      connectgaps:true,
+      connectgaps:false,
       hovertemplate:'<b>Depth:</b> %{y:.1f} m<br><b>PHI P50:</b> %{x:.4f}<extra></extra>'
     },
     // P90 — green dashed (conservative)
@@ -518,7 +518,7 @@ function renderPhiChart(records, depthAx){
       x: p90_vals, y: depths,
       type:'scatter', mode:'lines', name:'P90 (Conservative)',
       line:{width:2.2, dash:'dash', color:'#2E7D32'},
-      connectgaps:true,
+      connectgaps:false,
       hovertemplate:'<b>Depth:</b> %{y:.1f} m<br><b>PHI P90:</b> %{x:.4f}<extra></extra>'
     }
   ];
@@ -608,7 +608,7 @@ function renderSwChart(records, depthAx){
       x: p10_vals, y: depths,
       type:'scatter', mode:'lines', name:'P10 (Low Sw)',
       line:{width:2.2, dash:'dot', color:'#E65100'},
-      connectgaps:true,
+      connectgaps:false,
       hovertemplate:'<b>Depth:</b> %{y:.1f} m<br><b>SW P10:</b> %{x:.4f}<extra></extra>'
     },
     // P50 — blue solid (best estimate)
@@ -616,7 +616,7 @@ function renderSwChart(records, depthAx){
       x: p50_vals, y: depths,
       type:'scatter', mode:'lines', name:'P50 (Best Estimate)',
       line:{width:2.8, dash:'solid', color:'#1565C0'},
-      connectgaps:true,
+      connectgaps:false,
       hovertemplate:'<b>Depth:</b> %{y:.1f} m<br><b>SW P50:</b> %{x:.4f}<extra></extra>'
     },
     // P90 — green dashed (high Sw, pessimistic)
@@ -624,7 +624,7 @@ function renderSwChart(records, depthAx){
       x: p90_vals, y: depths,
       type:'scatter', mode:'lines', name:'P90 (High Sw)',
       line:{width:2.2, dash:'dash', color:'#2E7D32'},
-      connectgaps:true,
+      connectgaps:false,
       hovertemplate:'<b>Depth:</b> %{y:.1f} m<br><b>SW P90:</b> %{x:.4f}<extra></extra>'
     }
   ];
@@ -899,7 +899,7 @@ function initUncertainty() {
       method: 'POST',
       credentials: 'same-origin',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({phi_col: logName, phi_method: 'fixed', phi_unc: 0.03})
+      body: JSON.stringify({phi_col: logName, phi_method: 'percent', phi_pct: 0.12})
     })
       .then(function(r){ return safeJson(r, {success:false}); })
       .then(function(data) {
@@ -946,7 +946,7 @@ function initUncertainty() {
       method: 'POST',
       credentials: 'same-origin',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({sw_col: logName, sw_method: 'fixed', sw_unc: 0.05})
+      body: JSON.stringify({sw_col: logName, sw_method: 'percent', sw_pct: 0.15})
     })
       .then(function(r){ return safeJson(r, {success:false}); })
       .then(function(data) {
