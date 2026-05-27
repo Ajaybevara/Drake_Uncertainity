@@ -1,0 +1,961 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel glass mb-4">
+  <h3 style="color:#1a2540;">Uncertainty Quantification</h3>
+  <p class="mb-0" style="color:#5a6e8a;">P10 / P50 / P90 uncertainty envelopes for porosity and water saturation — computed from AI Prediction results. Select your log and click Calculate.</p>
+</div>
+
+<!-- Status Banner -->
+<div id="aiDataStatus" class="mb-3" style="display:none;padding:10px 16px;border-radius:10px;font-size:.9rem;"></div>
+
+<!-- ══ CONFIGURATION ══ -->
+<div class="panel glass mb-4">
+  <h4 class="mb-3" style="color:#1a2540;">Configuration</h4>
+  <div class="row g-4">
+
+    <!-- Porosity Card -->
+    <div class="col-xl-6">
+      <div class="unc-config-card" style="border-color:rgba(26,127,204,.22);background:rgba(26,127,204,.03);">
+        <div class="unc-config-header" style="color:#0a6aaa;">
+          <span class="unc-config-icon">📊</span> Porosity Uncertainty
+        </div>
+        <div class="unc-config-body">
+          <label class="unc-label">Select Porosity Log
+            <span class="unc-hint">porosity/density/neutron logs from LAS file</span>
+          </label>
+          <select id="phiLogSelect" class="unc-select">
+            <option value="">-- Loading logs... --</option>
+          </select>
+          <!-- Depth Range for Porosity Chart -->
+          <label class="unc-label" style="margin-top:8px;">Depth Range
+            <span class="unc-hint">filter chart by min / max depth from LAS file</span>
+          </label>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+            <label style="font-size:.78rem;color:#4a6a8a;font-weight:600;white-space:nowrap;">Unit:</label>
+            <select id="phiDepthUnit" class="unc-select" style="min-width:110px;padding:3px 6px;font-size:.8rem;">
+              <option value="m">Meters (m)</option>
+              <option value="ft">Feet (ft)</option>
+            </select>
+          </div>
+          <div class="unc-depth-row" id="phiDepthRow">
+            <input type="number" id="phiDepthMin" class="unc-depth-input" placeholder="Min depth" step="1">
+            <span class="unc-depth-sep">–</span>
+            <input type="number" id="phiDepthMax" class="unc-depth-input" placeholder="Max depth" step="1">
+            <button type="button" class="unc-depth-reset" onclick="resetUncDepth('phi')">↺ Reset</button>
+          </div>
+          <div id="phiDepthHint" class="unc-depth-hint"></div>
+          <div id="phiAiPreview" class="unc-preview" style="border-color:rgba(26,127,204,.18);background:rgba(26,127,204,.06);display:none;"></div>
+          <div id="phiLogWarning" style="display:none;padding:6px 12px;border-radius:7px;background:rgba(245,130,32,.10);border:1px solid rgba(245,130,32,.3);color:#f8c87a;font-size:.83rem;margin-bottom:6px;">⚠️ Please select a porosity log from the dropdown above first.</div>
+          <button id="btnComputePhi" class="unc-calc-btn" disabled style="background:linear-gradient(135deg,#1a7fcc,#1a5aaa);opacity:0.55;cursor:not-allowed;">
+            ⏳ Loading logs…
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Saturation Card -->
+    <div class="col-xl-6">
+      <div class="unc-config-card" style="border-color:rgba(176,120,0,.22);background:rgba(200,140,20,.02);">
+        <div class="unc-config-header" style="color:#7a5500;">
+          <span class="unc-config-icon">📊</span> Saturation Uncertainty
+        </div>
+        <div class="unc-config-body">
+          <label class="unc-label">Select Saturation Log
+            <span class="unc-hint">resistivity logs from LAS file</span>
+          </label>
+          <select id="swLogSelect" class="unc-select">
+            <option value="">-- Loading logs... --</option>
+          </select>
+          <!-- Depth Range for Saturation Chart -->
+          <label class="unc-label" style="margin-top:8px;">Depth Range
+            <span class="unc-hint">filter chart by min / max depth from LAS file</span>
+          </label>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+            <label style="font-size:.78rem;color:#4a6a8a;font-weight:600;white-space:nowrap;">Unit:</label>
+            <select id="swDepthUnit" class="unc-select" style="min-width:110px;padding:3px 6px;font-size:.8rem;">
+              <option value="m">Meters (m)</option>
+              <option value="ft">Feet (ft)</option>
+            </select>
+          </div>
+          <div class="unc-depth-row" id="swDepthRow">
+            <input type="number" id="swDepthMin" class="unc-depth-input" placeholder="Min depth" step="1">
+            <span class="unc-depth-sep">–</span>
+            <input type="number" id="swDepthMax" class="unc-depth-input" placeholder="Max depth" step="1">
+            <button type="button" class="unc-depth-reset" onclick="resetUncDepth('sw')">↺ Reset</button>
+          </div>
+          <div id="swDepthHint" class="unc-depth-hint"></div>
+          <div id="swAiPreview" class="unc-preview" style="border-color:rgba(176,120,0,.18);background:rgba(176,120,0,.05);display:none;"></div>
+          <div id="swLogWarning" style="display:none;padding:6px 12px;border-radius:7px;background:rgba(245,130,32,.10);border:1px solid rgba(245,130,32,.3);color:#f8c87a;font-size:.83rem;margin-bottom:6px;">⚠️ Please select a saturation log from the dropdown above first.</div>
+          <button id="btnComputeSw" class="unc-calc-btn" disabled style="background:linear-gradient(135deg,#c87a00,#a05500);opacity:0.55;cursor:not-allowed;">
+            ⏳ Loading logs…
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Summary Cards -->
+<div id="summaryCards" class="row g-3 mb-4" style="display:none;"></div>
+
+<!-- Charts Row -->
+<div class="row g-4 mb-4">
+  <div class="col-xl-6">
+    <div class="panel glass h-100">
+      <h4 class="mb-1" style="color:#0a6aaa;">Porosity Uncertainty: P10 / P50 / P90</h4>
+      <p style="font-size:.8rem;color:#5a6e8a;margin-bottom:10px;">Depth vs Porosity — P10 (dotted, optimistic), P50 (solid, best estimate), P90 (dashed, conservative)</p>
+      <div id="phiChart" style="min-height:640px;width:100%;"></div>
+      <div class="mt-3">
+        <button id="dlPhiCsv" class="btn btn-outline-primary w-100" style="border-color:#1a7fcc;color:#1a5aaa;">⬇ Download Porosity Uncertainty CSV</button>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-6">
+    <div class="panel glass h-100">
+      <h4 class="mb-1" style="color:#7a5500;">Saturation Uncertainty: P10 / P50 / P90</h4>
+      <p style="font-size:.8rem;color:#5a6e8a;margin-bottom:10px;">Depth vs Water Saturation — P10 (dotted, low Sw), P50 (solid, best estimate), P90 (dashed, high Sw)</p>
+      <div id="swChart" style="min-height:640px;width:100%;"></div>
+      <div class="mt-3">
+        <button id="dlSwCsv" class="btn w-100" style="border:1px solid #b07800;color:#7a5500;background:transparent;">⬇ Download Saturation Uncertainty CSV</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Preview Tables -->
+<div class="row g-4 mb-4">
+  <div class="col-xl-6">
+    <div class="panel glass">
+      <h5 class="mb-3" style="color:#0a6aaa;">Porosity Uncertainty — First 5 Rows</h5>
+      <div class="table-responsive">
+        <table class="table table-hover border">
+          <thead class="table-light"><tr><th>#</th><th>Depth</th><th>PHI P10</th><th>PHI P50</th><th>PHI P90</th><th>Spread</th></tr></thead>
+          <tbody id="phiTableBody"><tr><td colspan="6" class="text-center text-secondary">Run Porosity Uncertainty calculation to see results.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-6">
+    <div class="panel glass">
+      <h5 class="mb-3" style="color:#7a5500;">Saturation Uncertainty — First 5 Rows</h5>
+      <div class="table-responsive">
+        <table class="table table-hover border">
+          <thead class="table-light"><tr><th>#</th><th>Depth</th><th>SW P10</th><th>SW P50</th><th>SW P90</th><th>Spread</th></tr></thead>
+          <tbody id="swTableBody"><tr><td colspan="6" class="text-center text-secondary">Run Saturation Uncertainty calculation to see results.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Interpretation -->
+<div class="row g-4">
+  <div class="col-xl-6">
+    <div class="panel glass">
+      <h5 class="mb-3" style="color:#0a6aaa;">Porosity Uncertainty Interpretation</h5>
+      <ul id="phiInterpList" class="list-unstyled small" style="color:#2a4a6a;">
+        <li class="mb-2" style="color:#7a9abf;">✦ Run calculation above to see AI-generated interpretation.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="col-xl-6">
+    <div class="panel glass">
+      <h5 class="mb-3" style="color:#7a5500;">Saturation Uncertainty Interpretation</h5>
+      <ul id="swInterpList" class="list-unstyled small" style="color:#5a4000;">
+        <li class="mb-2" style="color:#a07830;">✦ Run calculation above to see AI-generated interpretation.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<style>
+/* ── Config cards ── */
+.unc-config-card {
+  border: 1.5px solid;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #fff;
+}
+.unc-config-header {
+  padding: 14px 18px;
+  font-size: 1rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid rgba(0,0,0,.06);
+  background: rgba(255,255,255,.7);
+}
+.unc-config-icon { font-size: 1.1rem; }
+.unc-config-body { padding: 18px; }
+.unc-label {
+  display: block;
+  font-size: .86rem;
+  font-weight: 600;
+  color: #2a4a6a;
+  margin-bottom: 8px;
+}
+.unc-hint {
+  display: block;
+  font-size: .76rem;
+  font-weight: 400;
+  color: #7a9abf;
+  margin-top: 2px;
+}
+.unc-select {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1.5px solid rgba(26,80,180,.18);
+  border-radius: 12px;
+  background: #f8fbff;
+  color: #1a2540;
+  font-size: .93rem;
+  margin-bottom: 12px;
+  appearance: auto;
+}
+.unc-select:focus {
+  outline: none;
+  border-color: #1a7fcc;
+  box-shadow: 0 0 0 3px rgba(26,127,204,.10);
+}
+.unc-preview {
+  padding: 9px 13px;
+  border-radius: 10px;
+  border: 1px solid;
+  font-size: .82rem;
+  margin-bottom: 14px;
+  color: #1a3a60;
+  line-height: 1.6;
+}
+.unc-calc-btn {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 12px;
+  color: #fff;
+  font-size: .95rem;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: .01em;
+  transition: all .18s;
+  box-shadow: 0 3px 14px rgba(0,0,0,.15);
+}
+.unc-calc-btn:hover { opacity: .88; transform: translateY(-1px); box-shadow: 0 5px 18px rgba(0,0,0,.2); }
+.unc-calc-btn:active { transform: translateY(0); }
+.unc-calc-btn:disabled { opacity: .55; cursor: not-allowed; transform: none; }
+
+/* Summary cards */
+.unc-card { padding: 16px 20px; border-radius: 18px; border: 1px solid rgba(26,127,204,.14); background: #fff; text-align: center; box-shadow: 0 2px 10px rgba(30,80,160,.07); }
+.unc-card .uc-val { font-size: 1.5rem; font-weight: 700; margin: 4px 0; }
+.unc-card .uc-lbl { font-size: .8rem; color: #5a6e8a; text-transform: uppercase; letter-spacing: .08em; }
+
+/* Depth range row */
+.unc-depth-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.unc-depth-input {
+  width: 110px; padding: 8px 11px;
+  border: 1.5px solid rgba(26,80,180,.18); border-radius: 10px;
+  background: #f4f8fd; color: #1a2540; font-size: .87rem; font-weight: 600;
+  outline: none; transition: border-color .15s;
+}
+.unc-depth-input:focus { border-color: #1a7fcc; box-shadow: 0 0 0 3px rgba(26,127,204,.10); }
+.unc-depth-input::placeholder { color: #9ab0c8; font-weight: 400; }
+.unc-depth-sep { font-size: 1rem; color: #5a6e8a; font-weight: 700; }
+.unc-depth-reset {
+  padding: 6px 12px; border-radius: 10px; border: 1.5px solid rgba(42,106,170,.28);
+  background: rgba(100,160,220,.09); color: #2a6a9a; font-size: .78rem; font-weight: 600;
+  cursor: pointer; transition: all .15s;
+}
+.unc-depth-reset:hover { background: rgba(26,127,204,.18); color: #1a5aaa; }
+.unc-depth-hint { font-size: .76rem; color: #7a9abf; font-style: italic; margin-bottom: 6px; min-height: 16px; }
+</style>
+
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script>
+// ── Helpers ──
+function fmt(v){ return (v===null||v===undefined||v==='')?'N/A':typeof v==='number'?v.toFixed(5):v; }
+function fmtN(v,d=4){ return (v===null||v===undefined||isNaN(Number(v)))?'N/A':Number(v).toFixed(d); }
+function safeNum(v){ const n=Number(v); return isNaN(n)?null:n; }
+function safeJson(r,fb){ const ct=r.headers.get("content-type")||""; if(!r.ok||!ct.includes("json")) return Promise.resolve(fb); return r.json().catch(()=>fb); }
+function fileDownload(url,name){ fetch(url,{credentials:'same-origin'}).then(r=>{if(!r.ok)throw new Error();return r.blob();}).then(blob=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();}).catch(()=>alert('Download failed')); }
+
+// ── Light mode Plotly base ──
+const LIGHT = {
+  paper_bgcolor: 'rgba(248,251,255,1)',
+  plot_bgcolor:  'rgba(255,255,255,1)',
+  font: {color: '#1a2540', size: 11}
+};
+
+let AI_STORE = null;
+let UNC_DEPTH_MIN = null;  // real depth bounds from loaded data
+let UNC_DEPTH_MAX = null;
+let PHI_RECORDS_CACHE = null;  // cached last-calculated records
+let SW_RECORDS_CACHE  = null;
+
+const UNC_M2FT = 3.28084;
+const UNC_FT2M = 1 / UNC_M2FT;
+
+function uncDepthUnit(type){
+  const id = type==='phi'?'phiDepthUnit':'swDepthUnit';
+  const el = document.getElementById(id);
+  return el ? el.value : 'm';
+}
+function uncToDisplay(valM, type){ return uncDepthUnit(type)==='ft' ? valM*UNC_M2FT : valM; }
+function uncToMeters(valDisp, type){ return uncDepthUnit(type)==='ft' ? valDisp*UNC_FT2M : valDisp; }
+function uncDepthLabel(type){ return uncDepthUnit(type)==='ft'?'ft':'m'; }
+
+function setUncDepthHints(min, max){
+  UNC_DEPTH_MIN = min; UNC_DEPTH_MAX = max;
+  ['phi','sw'].forEach(function(type){
+    const unit = uncDepthUnit(type);
+    const lbl = uncDepthLabel(type);
+    const mn = uncToDisplay(min, type);
+    const mx = uncToDisplay(max, type);
+    const hint = min!==null ? `LAS range: ${mn.toFixed(1)} – ${mx.toFixed(1)} ${lbl}` : '';
+    const hintEl = document.getElementById(type==='phi'?'phiDepthHint':'swDepthHint');
+    const minEl  = document.getElementById(type==='phi'?'phiDepthMin':'swDepthMin');
+    const maxEl  = document.getElementById(type==='phi'?'phiDepthMax':'swDepthMax');
+    if(hintEl) hintEl.textContent = hint;
+    if(minEl) minEl.placeholder = min!==null?mn.toFixed(0):'Min depth';
+    if(maxEl) maxEl.placeholder = max!==null?mx.toFixed(0):'Max depth';
+  });
+}
+
+function getUncDepthRange(type){
+  const minId = type==='phi'?'phiDepthMin':'swDepthMin';
+  const maxId = type==='phi'?'phiDepthMax':'swDepthMax';
+  const mn = parseFloat(document.getElementById(minId).value);
+  const mx = parseFloat(document.getElementById(maxId).value);
+  // Convert display unit → meters for filtering (DEPTH values from server are always meters)
+  return {
+    userMin: isNaN(mn)?null:uncToMeters(mn, type),
+    userMax: isNaN(mx)?null:uncToMeters(mx, type)
+  };
+}
+
+function filterRecordsByDepth(records, type){
+  const {userMin, userMax} = getUncDepthRange(type);
+  if(userMin===null&&userMax===null) return records;
+  return records.filter(r=>{
+    const d=safeNum(r.DEPTH);
+    if(d===null) return false;
+    if(userMin!==null&&d<userMin) return false;
+    if(userMax!==null&&d>userMax) return false;
+    return true;
+  });
+}
+
+function resetUncDepth(type){
+  const minId = type==='phi'?'phiDepthMin':'swDepthMin';
+  const maxId = type==='phi'?'phiDepthMax':'swDepthMax';
+  document.getElementById(minId).value='';
+  document.getElementById(maxId).value='';
+  // Re-render using cached records
+  if(type==='phi'&&PHI_RECORDS_CACHE){
+    const filtered=filterRecordsByDepth(PHI_RECORDS_CACHE,'phi');
+    const dAx=buildDepth(filtered,'phi'); renderPhiChart(filtered,dAx); renderPhiTable(filtered);
+  }
+  if(type==='sw'&&SW_RECORDS_CACHE){
+    const filtered=filterRecordsByDepth(SW_RECORDS_CACHE,'sw');
+    const dAx=buildDepth(filtered,'sw'); renderSwChart(filtered,dAx); renderSwTable(filtered);
+  }
+}
+
+function showAiStatus(msg, type='info'){
+  const el=document.getElementById('aiDataStatus');
+  const styles={
+    info:    'background:rgba(26,127,204,.08);border:1px solid rgba(26,127,204,.22);color:#1a4a8a;',
+    success: 'background:rgba(26,180,80,.08);border:1px solid rgba(26,180,80,.22);color:#1a5a2a;',
+    warn:    'background:rgba(200,150,20,.08);border:1px solid rgba(200,150,20,.22);color:#6a4a00;',
+    error:   'background:rgba(200,50,50,.08);border:1px solid rgba(200,50,50,.22);color:#7a1a1a;'
+  };
+  el.style.cssText='display:block;padding:10px 16px;border-radius:10px;font-size:.9rem;'+(styles[type]||styles.info);
+  el.innerHTML=msg;
+}
+
+// ── Build depth axis (inverted, high depth at bottom) ──
+function buildDepth(records, type){
+  const d=records.map(r=>safeNum(r.DEPTH)).filter(v=>v!==null);
+  if(!d.length)return{range:[500,0],tickvals:[],ticktext:[],unit:'m',yTitle:'Depth (m)'};
+  const rawMin=Math.min(...d), rawMax=Math.max(...d);
+  const span=rawMax-rawMin;
+  const unit = type ? uncDepthUnit(type) : 'm';
+  const lbl = unit==='ft'?'ft':'m';
+  const toDisp = v => unit==='ft' ? v*UNC_M2FT : v;
+  const toM = v => unit==='ft' ? v*UNC_FT2M : v;
+
+  // Choose step in display units
+  const dispSpan = toDisp(rawMax) - toDisp(rawMin);
+  let step=100;
+  if(dispSpan>10000)step=1000; else if(dispSpan>5000)step=500; else if(dispSpan>2000)step=200;
+  else if(dispSpan>1000)step=100; else if(dispSpan>500)step=50; else if(dispSpan>200)step=20; else step=10;
+
+  const dmin=Math.floor(toDisp(rawMin)/step)*step;
+  const dmax=Math.ceil(toDisp(rawMax)/step)*step;
+  const ticks=[]; // in display units
+  for(let v=dmin;v<=dmax;v+=step)ticks.push(v);
+
+  // Plot y-values are always in meters; tickvals must be in meters
+  const tickvalsM = ticks.map(toM);
+  const rangeM = [toM(dmax+step*0.1), toM(dmin-step*0.1)];
+  return{range:rangeM, tickvals:tickvalsM, ticktext:ticks.map(v=>v.toFixed(0)), unit:lbl, yTitle:`Depth (${lbl})`};
+}
+
+// ── Generate smooth synthetic well-log uncertainty curves ──
+// Porosity: S-shaped cumulative curve, X = 0→0.5 (MPVI), Y = depth (inverted)
+// P10 (blue, dotted) = optimistic (right/higher), P50 (green, solid) = mid, P90 (red, dashed) = conservative (left/lower)
+function generateSyntheticRecords(n=80, type='phi'){
+  const records=[];
+  const depthStart=500, depthEnd=2500;
+  const step=(depthEnd-depthStart)/(n-1);
+  // Smooth sigmoid helper
+  const sig = (t, k=10, t0=0.5) => 1/(1+Math.exp(-k*(t-t0)));
+  for(let i=0;i<n;i++){
+    const depth = depthStart + i*step;
+    const t = i/(n-1); // 0→1
+    if(type==='phi'){
+      // Smooth S-shaped porosity increasing with depth (compaction curve reversed)
+      // Add gentle formation-layer bumps (no random noise)
+      const base = sig(t,9,0.48)*0.38 + 0.025
+                  + 0.025*Math.sin(t*Math.PI*2.2)
+                  + 0.012*Math.sin(t*Math.PI*4.5);
+      const p50 = Math.max(0.01, Math.min(0.48, base));
+      // Fixed spread that widens slightly mid-section (uncertainty highest in transition zones)
+      const spread = 0.030 + 0.018*Math.sin(t*Math.PI);
+      const p10 = Math.min(0.52, p50 + spread);       // optimistic — right of P50
+      const p90 = Math.max(0.005, p50 - spread*0.85); // conservative — left of P50
+      records.push({
+        DEPTH: parseFloat(depth.toFixed(1)),
+        PHI_P10: parseFloat(p10.toFixed(5)),
+        PHI_P50: parseFloat(p50.toFixed(5)),
+        PHI_P90: parseFloat(p90.toFixed(5)),
+        PHI_UNCERTAINTY_SPREAD: parseFloat((p10-p90).toFixed(5))
+      });
+    } else {
+      // Sw S-curve: starts low in reservoir, rises toward water zone
+      const base = sig(t,8,0.52)*0.65 + 0.15
+                  + 0.04*Math.sin(t*Math.PI*2.0)
+                  + 0.02*Math.sin(t*Math.PI*5.0);
+      const p50 = Math.max(0.08, Math.min(0.95, base));
+      const spread = 0.04 + 0.025*Math.sin(t*Math.PI);
+      const p10 = Math.max(0.04, p50 - spread);       // optimistic — lower Sw
+      const p90 = Math.min(0.98, p50 + spread*0.85);  // pessimistic — higher Sw
+      records.push({
+        DEPTH: parseFloat(depth.toFixed(1)),
+        SW_P10: parseFloat(p10.toFixed(5)),
+        SW_P50: parseFloat(p50.toFixed(5)),
+        SW_P90: parseFloat(p90.toFixed(5)),
+        SW_UNCERTAINTY_SPREAD: parseFloat((p90-p10).toFixed(5))
+      });
+    }
+  }
+  return records;
+}
+// ══════════════════════════════════════════
+// RENDER PHI CHART
+// P10 = blue dotted  (optimistic / rightmost)
+// P50 = green solid  (best estimate / middle)
+// P90 = red dashed   (conservative / leftmost)
+// X = MPVI (porosity fraction), Y = Depth inverted
+// ══════════════════════════════════════════
+function renderPhiChart(records, depthAx){
+  const el=document.getElementById('phiChart');
+  const validRec=records.filter(r=>safeNum(r.PHI_P50)!==null && safeNum(r.DEPTH)!==null);
+  if(!validRec.length){
+    el.innerHTML='<div class="text-secondary p-4 text-center" style="padding-top:60px!important;">No valid porosity data to plot.<br><small>Run Porosity calculation in AI Prediction first.</small></div>';
+    return;
+  }
+  validRec.sort((a,b)=>safeNum(a.DEPTH)-safeNum(b.DEPTH));
+  const depths   = validRec.map(r=>safeNum(r.DEPTH));
+  const p10_vals = validRec.map(r=>safeNum(r.PHI_P10));
+  const p50_vals = validRec.map(r=>safeNum(r.PHI_P50));
+  const p90_vals = validRec.map(r=>safeNum(r.PHI_P90));
+
+  const traces = [
+    // P10 — orange dotted (optimistic)
+    {
+      x: p10_vals, y: depths,
+      type:'scatter', mode:'lines', name:'P10 (Optimistic)',
+      line:{width:2.2, dash:'dot', color:'#E65100'},
+      connectgaps:true,
+      hovertemplate:'<b>Depth:</b> %{y:.1f} m<br><b>PHI P10:</b> %{x:.4f}<extra></extra>'
+    },
+    // P50 — blue solid (best estimate)
+    {
+      x: p50_vals, y: depths,
+      type:'scatter', mode:'lines', name:'P50 (Best Estimate)',
+      line:{width:2.8, dash:'solid', color:'#1565C0'},
+      connectgaps:true,
+      hovertemplate:'<b>Depth:</b> %{y:.1f} m<br><b>PHI P50:</b> %{x:.4f}<extra></extra>'
+    },
+    // P90 — green dashed (conservative)
+    {
+      x: p90_vals, y: depths,
+      type:'scatter', mode:'lines', name:'P90 (Conservative)',
+      line:{width:2.2, dash:'dash', color:'#2E7D32'},
+      connectgaps:true,
+      hovertemplate:'<b>Depth:</b> %{y:.1f} m<br><b>PHI P90:</b> %{x:.4f}<extra></extra>'
+    }
+  ];
+
+  // ── Smart X-axis ticks: max 6 ticks, rounded to clean intervals, no overlap ──
+  const allX = [...p10_vals,...p50_vals,...p90_vals].filter(v=>v!==null&&!isNaN(v));
+  const rawMax = allX.length ? Math.max(...allX) : 0.5;
+  // Round up to nearest clean interval
+  const intervals = [0.05,0.1,0.15,0.2,0.25,0.5];
+  const targetTicks = 5;
+  let tickStep = intervals.find(s => Math.ceil(rawMax/s) <= targetTicks+1) || 0.5;
+  const xMax = Math.ceil(rawMax/tickStep)*tickStep + tickStep*0.05;
+  const xTicks=[];
+  for(let v=0; v<=xMax+tickStep*0.01; v=parseFloat((v+tickStep).toFixed(10))) {
+    xTicks.push(parseFloat(v.toFixed(4)));
+    if(xTicks.length>8) break;
+  }
+
+  const layout = {
+    paper_bgcolor:'rgba(248,251,255,1)',
+    plot_bgcolor:'rgba(255,255,255,1)',
+    font:{color:'#1a2540', size:11},
+    margin:{l:72, r:20, t:50, b:72},
+    height:660,
+    xaxis:{
+      title:{text:'MPVI (Porosity fraction)', font:{color:'#1a2540',size:12}, standoff:14},
+      range:[0, xMax],
+      tickvals: xTicks,
+      ticktext: xTicks.map(v=>v.toFixed(2)),
+      tickmode:'array',
+      tickfont:{color:'#1a2540', size:11},
+      tickangle:0,
+      gridcolor:'rgba(26,80,160,0.09)',
+      zeroline:true, zerolinecolor:'rgba(0,0,0,0.25)', zerolinewidth:1,
+      showline:true, linecolor:'rgba(0,0,0,0.30)', linewidth:1.5,
+      mirror:true, showgrid:true,
+      color:'#1a2540'
+    },
+    yaxis:{
+      title:{text: depthAx.yTitle||'Depth (m)', font:{color:'#1a2540',size:12}, standoff:8},
+      autorange:false,
+      range: depthAx.range,
+      tickvals: depthAx.tickvals,
+      ticktext: depthAx.ticktext,
+      tickmode:'array',
+      tickfont:{color:'#1a2540', size:11},
+      gridcolor:'rgba(26,80,160,0.08)',
+      showline:true, linecolor:'rgba(0,0,0,0.25)', linewidth:1.5,
+      mirror:true, showgrid:true,
+      color:'#1a2540'
+    },
+    legend:{
+      x:0.60, y:0.20,
+      bgcolor:'rgba(255,255,255,0.95)',
+      bordercolor:'rgba(0,0,0,0.18)', borderwidth:1,
+      font:{color:'#1a2540', size:12}
+    },
+    hovermode:'closest'
+  };
+
+  Plotly.newPlot(el, traces, layout, {responsive:true, displaylogo:false, scrollZoom:true});
+}
+
+// ══════════════════════════════════════════
+// RENDER SW CHART
+// P10 = blue dotted  (low Sw / optimistic)
+// P50 = green solid  (best estimate)
+// P90 = red dashed   (high Sw / pessimistic)
+// X = Sw fraction 0→1, Y = Depth inverted
+// ══════════════════════════════════════════
+function renderSwChart(records, depthAx){
+  const el=document.getElementById('swChart');
+  const validRec=records.filter(r=>safeNum(r.SW_P50)!==null && safeNum(r.DEPTH)!==null);
+  if(!validRec.length){
+    el.innerHTML='<div class="text-secondary p-4 text-center" style="padding-top:60px!important;">No valid saturation data to plot.<br><small>Run Saturation calculation in AI Prediction first.</small></div>';
+    return;
+  }
+  validRec.sort((a,b)=>safeNum(a.DEPTH)-safeNum(b.DEPTH));
+  const depths   = validRec.map(r=>safeNum(r.DEPTH));
+  const p10_vals = validRec.map(r=>safeNum(r.SW_P10));
+  const p50_vals = validRec.map(r=>safeNum(r.SW_P50));
+  const p90_vals = validRec.map(r=>safeNum(r.SW_P90));
+
+  const traces = [
+    // P10 — orange dotted (low Sw, optimistic)
+    {
+      x: p10_vals, y: depths,
+      type:'scatter', mode:'lines', name:'P10 (Low Sw)',
+      line:{width:2.2, dash:'dot', color:'#E65100'},
+      connectgaps:true,
+      hovertemplate:'<b>Depth:</b> %{y:.1f} m<br><b>SW P10:</b> %{x:.4f}<extra></extra>'
+    },
+    // P50 — blue solid (best estimate)
+    {
+      x: p50_vals, y: depths,
+      type:'scatter', mode:'lines', name:'P50 (Best Estimate)',
+      line:{width:2.8, dash:'solid', color:'#1565C0'},
+      connectgaps:true,
+      hovertemplate:'<b>Depth:</b> %{y:.1f} m<br><b>SW P50:</b> %{x:.4f}<extra></extra>'
+    },
+    // P90 — green dashed (high Sw, pessimistic)
+    {
+      x: p90_vals, y: depths,
+      type:'scatter', mode:'lines', name:'P90 (High Sw)',
+      line:{width:2.2, dash:'dash', color:'#2E7D32'},
+      connectgaps:true,
+      hovertemplate:'<b>Depth:</b> %{y:.1f} m<br><b>SW P90:</b> %{x:.4f}<extra></extra>'
+    }
+  ];
+
+  // Fixed clean ticks for Sw: 0.0, 0.2, 0.4, 0.6, 0.8, 1.0
+  const swXticks=[0,0.2,0.4,0.6,0.8,1.0];
+  const layout = {
+    paper_bgcolor:'rgba(248,251,255,1)',
+    plot_bgcolor:'rgba(255,255,255,1)',
+    font:{color:'#1a2540', size:11},
+    margin:{l:72, r:20, t:50, b:72},
+    height:660,
+    xaxis:{
+      title:{text:'Water Saturation Sw', font:{color:'#1a2540',size:12}, standoff:14},
+      range:[0, 1.05],
+      tickvals: swXticks,
+      ticktext: swXticks.map(v=>v.toFixed(1)),
+      tickmode:'array',
+      tickfont:{color:'#1a2540', size:11},
+      tickangle:0,
+      gridcolor:'rgba(150,100,0,0.09)',
+      zeroline:true, zerolinecolor:'rgba(0,0,0,0.25)', zerolinewidth:1,
+      showline:true, linecolor:'rgba(0,0,0,0.30)', linewidth:1.5,
+      mirror:true, showgrid:true,
+      color:'#1a2540'
+    },
+    yaxis:{
+      title:{text: depthAx.yTitle||'Depth (m)', font:{color:'#1a2540',size:12}, standoff:8},
+      autorange:false,
+      range: depthAx.range,
+      tickvals: depthAx.tickvals,
+      ticktext: depthAx.ticktext,
+      tickmode:'array',
+      tickfont:{color:'#1a2540', size:11},
+      gridcolor:'rgba(150,100,0,0.08)',
+      showline:true, linecolor:'rgba(0,0,0,0.25)', linewidth:1.5,
+      mirror:true, showgrid:true,
+      color:'#1a2540'
+    },
+    legend:{
+      x:0.60, y:0.20,
+      bgcolor:'rgba(255,255,255,0.95)',
+      bordercolor:'rgba(0,0,0,0.18)', borderwidth:1,
+      font:{color:'#1a2540', size:12}
+    },
+    hovermode:'closest'
+  };
+
+  Plotly.newPlot(el, traces, layout, {responsive:true, displaylogo:false, scrollZoom:true});
+}
+
+// ── TABLE RENDERERS ──
+function renderPhiTable(allRec){
+  const valid=allRec.filter(r=>safeNum(r.DEPTH)!==null&&safeNum(r.PHI_P50)!==null).slice(0,5);
+  document.getElementById('phiTableBody').innerHTML = valid.length
+    ? valid.map((r,i)=>`<tr>
+        <td>${i+1}</td>
+        <td><strong>${fmtN(safeNum(r.DEPTH),2)}</strong></td>
+        <td style="color:#1a7a40;">${fmt(safeNum(r.PHI_P10))}</td>
+        <td style="color:#1a3a8a;font-weight:600;">${fmt(safeNum(r.PHI_P50))}</td>
+        <td style="color:#cc2244;">${fmt(safeNum(r.PHI_P90))}</td>
+        <td style="color:#5a5a10;">${fmt(safeNum(r.PHI_UNCERTAINTY_SPREAD))}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="6" class="text-center text-secondary">No valid porosity rows found.</td></tr>';
+}
+
+function renderSwTable(allRec){
+  const valid=allRec.filter(r=>safeNum(r.DEPTH)!==null&&safeNum(r.SW_P50)!==null).slice(0,5);
+  document.getElementById('swTableBody').innerHTML = valid.length
+    ? valid.map((r,i)=>`<tr>
+        <td>${i+1}</td>
+        <td><strong>${fmtN(safeNum(r.DEPTH),2)}</strong></td>
+        <td style="color:#1a7a40;">${fmt(safeNum(r.SW_P10))}</td>
+        <td style="color:#7a4500;font-weight:600;">${fmt(safeNum(r.SW_P50))}</td>
+        <td style="color:#cc2244;">${fmt(safeNum(r.SW_P90))}</td>
+        <td style="color:#5a5a10;">${fmt(safeNum(r.SW_UNCERTAINTY_SPREAD))}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="6" class="text-center text-secondary">No valid saturation rows found.</td></tr>';
+}
+
+// ── SUMMARY CARDS ──
+function showSummaryCards(sc, type){
+  const cardBox=document.getElementById('summaryCards');
+  cardBox.style.display='flex'; cardBox.style.flexWrap='wrap';
+  const existing=cardBox.innerHTML;
+  if(type==='phi'){
+    const phiCards=`
+      <div class="col-md-3"><div class="unc-card"><div class="uc-lbl">AVG PHI P50</div><div class="uc-val" style="color:#1a3a8a;">${fmtN(sc.avg_phi_p50)}</div><div class="uc-lbl">BEST ESTIMATE</div></div></div>
+      <div class="col-md-3"><div class="unc-card"><div class="uc-lbl">AVG PHI SPREAD</div><div class="uc-val" style="color:#1a7a40;">${fmtN(sc.avg_phi_spread)}</div><div class="uc-lbl">P90−P10 RANGE</div></div></div>`;
+    const swPart=existing.includes('AVG SW')?existing.slice(existing.indexOf('<div class="col-md-3"><div class="unc-card"><div class="uc-lbl">AVG SW')):'' ;
+    cardBox.innerHTML=phiCards+swPart;
+  }else{
+    const swCards=`
+      <div class="col-md-3"><div class="unc-card"><div class="uc-lbl">AVG SW P50</div><div class="uc-val" style="color:#7a4500;">${fmtN(sc.avg_sw_p50)}</div><div class="uc-lbl">BEST ESTIMATE</div></div></div>
+      <div class="col-md-3"><div class="unc-card"><div class="uc-lbl">AVG SW SPREAD</div><div class="uc-val" style="color:#cc2244;">${fmtN(sc.avg_sw_spread)}</div><div class="uc-lbl">P90−P10 RANGE</div></div></div>`;
+    const phiPart=existing.includes('AVG PHI')?existing.slice(0,existing.indexOf('<div class="col-md-3"><div class="unc-card"><div class="uc-lbl">AVG SW')).trimEnd():'';
+    cardBox.innerHTML=phiPart+swCards;
+  }
+}
+
+// ══════════════════════════════════════════
+// INIT — populate dropdowns then auto-render synthetic charts
+// ══════════════════════════════════════════
+function populateSelect(selectEl, logs, defaultLog, placeholder) {
+  selectEl.innerHTML = '';
+  if (!logs || !logs.length) {
+    const opt = document.createElement('option');
+    opt.value = ''; opt.textContent = placeholder || '-- No logs found --';
+    selectEl.appendChild(opt);
+    return;
+  }
+  logs.forEach(function(log) {
+    const opt = document.createElement('option');
+    opt.value = log; opt.textContent = log;
+    if (log === defaultLog) opt.selected = true;
+    selectEl.appendChild(opt);
+  });
+}
+
+function autoRenderCharts() {
+  // Always render synthetic charts immediately so charts are never blank
+  const synPhi = generateSyntheticRecords(80, 'phi');
+  const synSw  = generateSyntheticRecords(80, 'sw');
+  const dAxPhi = buildDepth(synPhi,'phi');
+  const dAxSw  = buildDepth(synSw,'sw');
+  renderPhiChart(synPhi, dAxPhi);
+  renderSwChart(synSw, dAxSw);
+  renderPhiTable(synPhi);
+  renderSwTable(synSw);
+  // Summary cards
+  const avgPhiP50   = synPhi.reduce((s,r)=>s+r.PHI_P50,0)/synPhi.length;
+  const avgPhiSpread= synPhi.reduce((s,r)=>s+r.PHI_UNCERTAINTY_SPREAD,0)/synPhi.length;
+  const avgSwP50    = synSw.reduce((s,r)=>s+r.SW_P50,0)/synSw.length;
+  const avgSwSpread = synSw.reduce((s,r)=>s+r.SW_UNCERTAINTY_SPREAD,0)/synSw.length;
+  showSummaryCards({avg_phi_p50:avgPhiP50, avg_phi_spread:avgPhiSpread}, 'phi');
+  showSummaryCards({avg_sw_p50:avgSwP50, avg_sw_spread:avgSwSpread}, 'sw');
+}
+
+function initUncertainty() {
+  const phiSel = document.getElementById('phiLogSelect');
+  const swSel  = document.getElementById('swLogSelect');
+
+  // ── Fetch well name for named CSV downloads ──────────────
+  let _uncWellName = 'well';
+  fetch('/well-info', {credentials:'same-origin'}).then(r=>r.json()).then(d=>{
+    if(d.success && d.summary && d.summary.well_name) _uncWellName = d.summary.well_name;
+  }).catch(()=>{});
+  function _safeUncWell(){
+    return (_uncWellName||'well').replace(/[^a-zA-Z0-9_\-]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').toLowerCase()||'well';
+  }
+
+  // Wire depth range inputs to re-render immediately when changed
+  ['phiDepthMin','phiDepthMax'].forEach(function(id){
+    document.getElementById(id).addEventListener('change', function(){
+      if(PHI_RECORDS_CACHE){
+        const filtered=filterRecordsByDepth(PHI_RECORDS_CACHE,'phi');
+        renderPhiChart(filtered,buildDepth(filtered,'phi')); renderPhiTable(filtered);
+      }
+    });
+  });
+  ['swDepthMin','swDepthMax'].forEach(function(id){
+    document.getElementById(id).addEventListener('change', function(){
+      if(SW_RECORDS_CACHE){
+        const filtered=filterRecordsByDepth(SW_RECORDS_CACHE,'sw');
+        renderSwChart(filtered,buildDepth(filtered,'sw')); renderSwTable(filtered);
+      }
+    });
+  });
+
+  // Wire depth unit selectors to update hints and re-render charts
+  var phiUnitSel = document.getElementById('phiDepthUnit');
+  var swUnitSel  = document.getElementById('swDepthUnit');
+  if(phiUnitSel){
+    phiUnitSel.addEventListener('change', function(){
+      if(UNC_DEPTH_MIN!==null) setUncDepthHints(UNC_DEPTH_MIN, UNC_DEPTH_MAX);
+      document.getElementById('phiDepthMin').value='';
+      document.getElementById('phiDepthMax').value='';
+      var recs = PHI_RECORDS_CACHE || generateSyntheticRecords(80,'phi');
+      var filtered=filterRecordsByDepth(recs,'phi');
+      renderPhiChart(filtered, buildDepth(filtered,'phi')); renderPhiTable(filtered);
+    });
+  }
+  if(swUnitSel){
+    swUnitSel.addEventListener('change', function(){
+      if(UNC_DEPTH_MIN!==null) setUncDepthHints(UNC_DEPTH_MIN, UNC_DEPTH_MAX);
+      document.getElementById('swDepthMin').value='';
+      document.getElementById('swDepthMax').value='';
+      var recs = SW_RECORDS_CACHE || generateSyntheticRecords(80,'sw');
+      var filtered=filterRecordsByDepth(recs,'sw');
+      renderSwChart(filtered, buildDepth(filtered,'sw')); renderSwTable(filtered);
+    });
+  }
+
+  // Auto-render synthetic charts immediately (no waiting for logs)
+  autoRenderCharts();
+
+  // Try to fetch real logs from the server
+  fetch('/uncertainty-logs', {credentials:'same-origin'})
+    .then(function(r){ return safeJson(r, {success:false}); })
+    .then(function(data) {
+      if (data.success) {
+        const phiLogs = data.porosity_logs  || data.all_logs || [];
+        const swLogs  = data.saturation_logs || data.all_logs || [];
+        if (phiLogs.length) {
+          populateSelect(phiSel, phiLogs, data.default_phi_log, '-- Select Porosity Log --');
+          const phiBtn = document.getElementById('btnComputePhi');
+          phiBtn.disabled = false; phiBtn.style.opacity='1'; phiBtn.style.cursor='pointer';
+          phiBtn.textContent = '\u2699 Calculate Porosity Uncertainty';
+          showAiStatus('✅ LAS file loaded — ' + phiLogs.length + ' porosity log(s) and ' + (swLogs.length) + ' saturation log(s) available.', 'success');
+        } else {
+          populateSelect(phiSel, [], null, '-- No porosity logs found --');
+        }
+        if (swLogs.length) {
+          populateSelect(swSel, swLogs, data.default_sw_log, '-- Select Saturation Log --');
+          const swBtn = document.getElementById('btnComputeSw');
+          swBtn.disabled = false; swBtn.style.opacity='1'; swBtn.style.cursor='pointer';
+          swBtn.textContent = '\u2699 Calculate Saturation Uncertainty';
+        } else {
+          populateSelect(swSel, [], null, '-- No saturation logs found --');
+        }
+        // Set depth range hints from server data if available
+        if(data.depth_min!==undefined&&data.depth_max!==undefined){
+          setUncDepthHints(Number(data.depth_min), Number(data.depth_max));
+        }
+        AI_STORE = data;
+      } else {
+        // No LAS loaded — show friendly message, keep synthetic charts visible
+        populateSelect(phiSel, [], null, '-- Upload a LAS file first --');
+        populateSelect(swSel, [], null, '-- Upload a LAS file first --');
+        const phiBtn = document.getElementById('btnComputePhi');
+        phiBtn.disabled = false; phiBtn.style.opacity='0.7'; phiBtn.style.cursor='pointer';
+        phiBtn.textContent = '\u2699 Calculate Porosity Uncertainty';
+        const swBtn = document.getElementById('btnComputeSw');
+        swBtn.disabled = false; swBtn.style.opacity='0.7'; swBtn.style.cursor='pointer';
+        swBtn.textContent = '\u2699 Calculate Saturation Uncertainty';
+        showAiStatus('ℹ️ No LAS file loaded. Showing synthetic example curves. Upload a LAS file via the Dashboard to compute real uncertainty.', 'info');
+      }
+    })
+    .catch(function() {
+      populateSelect(phiSel, [], null, '-- Server error loading logs --');
+      populateSelect(swSel, [], null, '-- Server error loading logs --');
+      const phiBtn = document.getElementById('btnComputePhi');
+      phiBtn.disabled = false; phiBtn.style.opacity='0.7'; phiBtn.style.cursor='pointer';
+      phiBtn.textContent = '\u2699 Calculate Porosity Uncertainty';
+      const swBtn = document.getElementById('btnComputeSw');
+      swBtn.disabled = false; swBtn.style.opacity='0.7'; swBtn.style.cursor='pointer';
+      swBtn.textContent = '\u2699 Calculate Saturation Uncertainty';
+      showAiStatus('⚠️ Could not reach server. Showing synthetic example curves.', 'warn');
+    });
+
+  // ── Calculate buttons ──
+  document.getElementById('btnComputePhi').addEventListener('click', function() {
+    const logName = phiSel.value;
+    const warn = document.getElementById('phiLogWarning');
+    if (!logName) {
+      if(warn){ warn.style.display='block'; }
+      showAiStatus('⚠️ Please select a porosity log first.', 'warn');
+      return;
+    }
+    if(warn) warn.style.display='none';
+    this.disabled = true; this.textContent = '⏳ Calculating…'; this.style.opacity='0.75';
+    const btn = this;
+    fetch('/compute-uncertainty', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({phi_col: logName, phi_method: 'fixed', phi_unc: 0.03})
+    })
+      .then(function(r){ return safeJson(r, {success:false}); })
+      .then(function(data) {
+        btn.disabled = false; btn.textContent = '⚙ Calculate Porosity Uncertainty'; btn.style.opacity='1';
+        const records = data.all_records || data.records || [];
+        if (data.success && records.length) {
+          PHI_RECORDS_CACHE = records;
+          // Update depth hints from real data
+          const depths=records.map(r=>safeNum(r.DEPTH)).filter(v=>v!==null);
+          if(depths.length&&UNC_DEPTH_MIN===null){setUncDepthHints(Math.min(...depths),Math.max(...depths));}
+          const filtered = filterRecordsByDepth(records, 'phi');
+          const dAx = buildDepth(filtered,'phi');
+          renderPhiChart(filtered, dAx);
+          renderPhiTable(filtered);
+          if (data.summary_cards) showSummaryCards(data.summary_cards, 'phi');
+          if (data.phi_interp && data.phi_interp.length) {
+            document.getElementById('phiInterpList').innerHTML = data.phi_interp.map(s=>`<li class="mb-2">✦ ${s}</li>`).join('');
+          }
+          showAiStatus('✅ Porosity uncertainty calculated using ' + logName + '.', 'success');
+        } else {
+          const syn = generateSyntheticRecords(80, 'phi');
+          renderPhiChart(syn, buildDepth(syn,'phi')); renderPhiTable(syn);
+          showAiStatus('⚠️ ' + (data.message || 'No prediction data yet. Showing synthetic curves. Run AI Prediction first.'), 'warn');
+        }
+      })
+      .catch(function() {
+        btn.disabled = false; btn.textContent = '⚙ Calculate Porosity Uncertainty'; btn.style.opacity='1';
+        showAiStatus('⚠️ Server error. Showing synthetic example curves.', 'warn');
+      });
+  });
+
+  document.getElementById('btnComputeSw').addEventListener('click', function() {
+    const logName = swSel.value;
+    const warn = document.getElementById('swLogWarning');
+    if (!logName) {
+      if(warn){ warn.style.display='block'; }
+      showAiStatus('⚠️ Please select a saturation log first.', 'warn');
+      return;
+    }
+    if(warn) warn.style.display='none';
+    this.disabled = true; this.textContent = '⏳ Calculating…'; this.style.opacity='0.75';
+    const btn = this;
+    fetch('/compute-uncertainty', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({sw_col: logName, sw_method: 'fixed', sw_unc: 0.05})
+    })
+      .then(function(r){ return safeJson(r, {success:false}); })
+      .then(function(data) {
+        btn.disabled = false; btn.textContent = '⚙ Calculate Saturation Uncertainty'; btn.style.opacity='1';
+        const records = data.all_records || data.records || [];
+        if (data.success && records.length) {
+          SW_RECORDS_CACHE = records;
+          // Update depth hints from real data
+          const depths=records.map(r=>safeNum(r.DEPTH)).filter(v=>v!==null);
+          if(depths.length&&UNC_DEPTH_MIN===null){setUncDepthHints(Math.min(...depths),Math.max(...depths));}
+          const filtered = filterRecordsByDepth(records, 'sw');
+          const dAx = buildDepth(filtered,'sw');
+          renderSwChart(filtered, dAx);
+          renderSwTable(filtered);
+          if (data.summary_cards) showSummaryCards(data.summary_cards, 'sw');
+          if (data.sw_interp && data.sw_interp.length) {
+            document.getElementById('swInterpList').innerHTML = data.sw_interp.map(s=>`<li class="mb-2">✦ ${s}</li>`).join('');
+          }
+          showAiStatus('✅ Saturation uncertainty calculated using ' + logName + '.', 'success');
+        } else {
+          const syn = generateSyntheticRecords(80, 'sw');
+          renderSwChart(syn, buildDepth(syn,'sw')); renderSwTable(syn);
+          showAiStatus('⚠️ ' + (data.message || 'No prediction data yet. Showing synthetic curves. Run AI Prediction first.'), 'warn');
+        }
+      })
+      .catch(function() {
+        btn.disabled = false; btn.textContent = '⚙ Calculate Saturation Uncertainty'; btn.style.opacity='1';
+        showAiStatus('⚠️ Server error. Showing synthetic example curves.', 'warn');
+      });
+  });
+
+  // ── CSV downloads ──
+  document.getElementById('dlPhiCsv').addEventListener('click', function(){
+    fileDownload('/download-uncertainty-csv/porosity', _safeUncWell()+'_porosity_uncertainty.csv');
+  });
+  document.getElementById('dlSwCsv').addEventListener('click', function(){
+    fileDownload('/download-uncertainty-csv/saturation', _safeUncWell()+'_saturation_uncertainty.csv');
+  });
+}
+
+initUncertainty();
+</script>
+{% endblock %}

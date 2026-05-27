@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DrakeAI — Reservoir Intelligence</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#eef3fa;--bg2:#e4edf8;--panel:#ffffff;
+      --edge:rgba(26,100,200,.13);--text:#1a2540;--muted:#5a6e8a;
+      --accent:#1a7fcc;--accent2:#2a5fcc;--ok:#1cb86b;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;min-height:100vh;
+      font-family:'Segoe UI',Inter,Arial,sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(circle at top right,rgba(180,215,255,.55),transparent 28%),
+        radial-gradient(circle at bottom left,rgba(200,225,255,.40),transparent 24%),
+        linear-gradient(160deg,var(--bg),var(--bg2));
+      display:grid;place-items:center;padding:20px;
+    }
+    .layout{
+      width:min(1340px,98vw);
+      display:grid;grid-template-columns:252px 1fr;
+      min-height:84vh;
+      border:1px solid var(--edge);border-radius:28px;
+      overflow:hidden;
+      box-shadow:0 16px 56px rgba(26,80,160,.12),0 2px 8px rgba(26,80,160,.06);
+    }
+    /* ── Sidebar ── */
+    .sidebar{
+      padding:24px 18px;
+      background:linear-gradient(180deg,#ffffff,#f0f6ff);
+      border-right:1px solid var(--edge);
+    }
+    .brand{font-size:2rem;font-weight:800;color:#1a2540;letter-spacing:.02em}
+    .brand span{color:#1a7fcc}
+    .brand-sub{font-size:.95rem;color:var(--muted);margin-top:-2px;margin-bottom:22px}
+    .menu-link{
+      display:block;padding:14px 16px;border-radius:16px;
+      color:var(--text);text-decoration:none;margin-bottom:10px;
+      background:linear-gradient(90deg,rgba(26,127,204,.12),rgba(42,95,204,.06));
+      border:1px solid rgba(26,127,204,.22);color:#1a7fcc;font-weight:600;
+      font-size:1.02rem;
+    }
+    .status-pill{
+      display:inline-flex;align-items:center;gap:8px;
+      padding:10px 14px;border-radius:999px;
+      background:rgba(240,248,255,.95);
+      border:1px solid rgba(26,127,204,.15);color:#2a5a8a;
+      font-size:.88rem;margin-top:auto;
+    }
+    .dot{width:10px;height:10px;border-radius:50%;background:#1cb86b;box-shadow:0 0 8px rgba(28,184,107,.6)}
+    /* ── Main ── */
+    .main{background:#f7faff}
+    .topbar{
+      display:flex;justify-content:space-between;align-items:center;
+      padding:16px 22px;
+      border-bottom:1px solid var(--edge);
+      background:linear-gradient(90deg,rgba(255,255,255,.98),rgba(244,250,255,.97));
+    }
+    .eyebrow{font-size:.83rem;letter-spacing:.2em;text-transform:uppercase;color:#1a7fcc;font-weight:600}
+    .logout-btn{
+      padding:11px 22px;border:none;border-radius:14px;
+      background:linear-gradient(90deg,#1a7fcc,#2a5fcc);
+      color:white;font-weight:600;cursor:pointer;font-size:.94rem;
+      box-shadow:0 3px 12px rgba(26,100,200,.20);
+    }
+    .logout-btn:hover{opacity:.9}
+    .content{padding:24px;display:grid;grid-template-columns:1.45fr .95fr;gap:22px}
+    /* ── Hero panel ── */
+    .panel{
+      background:linear-gradient(180deg,rgba(255,255,255,.99),rgba(248,252,255,.98));
+      border:1px solid var(--edge);border-radius:24px;padding:28px;
+      box-shadow:0 4px 20px rgba(26,80,160,.07);
+    }
+    .headline{font-size:2.85rem;font-weight:800;line-height:1.06;color:#1a2540}
+    .muted{color:var(--muted)}
+    .tag-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:22px}
+    .tag-card{
+      padding:14px 16px;border-radius:18px;
+      background:rgba(235,244,255,.95);
+      border:1px solid rgba(26,127,204,.12);
+    }
+    .tag-card .tc-lbl{font-size:.8rem;color:var(--muted)}
+    .tag-card .tc-val{font-size:1rem;font-weight:700;color:#1a2540}
+    /* ── Auth panel ── */
+    .tabs{display:flex;gap:8px;margin-bottom:22px}
+    .tab{
+      flex:1;padding:12px 16px;border-radius:14px;
+      border:1.5px solid rgba(26,127,204,.16);
+      background:#eef4fc;color:#4a6a8a;
+      font-weight:600;cursor:pointer;font-size:.94rem;
+      transition:all .18s;
+    }
+    .tab.active{
+      background:linear-gradient(90deg,rgba(26,127,204,.15),rgba(42,95,204,.08));
+      border-color:rgba(26,127,204,.35);color:#1a5aaa;
+    }
+    .form-label{font-size:.84rem;font-weight:600;color:#2a4a6a}
+    .form-control{
+      background:#f4f8fd;
+      border:1.5px solid rgba(26,127,204,.16);
+      border-radius:12px;padding:11px 14px;
+      color:#1a2540;font-size:.93rem;
+      transition:border-color .18s,box-shadow .18s;
+    }
+    .form-control:focus{
+      border-color:#1a7fcc;
+      box-shadow:0 0 0 3px rgba(26,127,204,.10);
+      background:#fff;outline:none;
+    }
+    .form-control::placeholder{color:#a8bdd4}
+    .btn-primary{
+      background:linear-gradient(135deg,#1a7fcc,#1a52aa);
+      border:none;color:#fff;
+      font-size:1rem;font-weight:700;
+      border-radius:14px;padding:13px;
+      box-shadow:0 4px 18px rgba(26,100,200,.22);
+      cursor:pointer;transition:all .2s;
+    }
+    .btn-primary:hover{background:linear-gradient(135deg,#2090e0,#1a62be);transform:translateY(-1px);box-shadow:0 6px 24px rgba(26,100,200,.30)}
+    #reg-fields{display:none}
+    #msg{font-size:.87rem;margin-top:12px}
+    @media(max-width:1050px){
+      .layout{grid-template-columns:1fr}
+      .sidebar{display:none}
+      .content{grid-template-columns:1fr}
+      .headline{font-size:2.1rem}
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar d-flex flex-column">
+    <div class="brand"><span>Drake</span>AI</div>
+    <div class="brand-sub">Reservoir intelligence</div>
+    <a class="menu-link" href="#">Login / Register</a>
+    <div class="status-pill mt-auto"><span class="dot"></span> AI Ready</div>
+  </aside>
+
+  <!-- Main -->
+  <section class="main">
+    <div class="topbar">
+      <div>
+        <div class="eyebrow">Industrial Geological Dashboard</div>
+        <h2 class="mb-0" style="color:#1a2540;font-weight:700;">AI-powered LAS well log analysis</h2>
+      </div>
+      <button class="logout-btn">Logout</button>
+    </div>
+
+    <div class="content">
+      <!-- Hero -->
+      <div class="panel">
+        <h1 class="headline">Subsurface interpretation,<br>upgraded.</h1>
+        <p class="muted mt-3" style="font-size:1rem;line-height:1.65;">Upload LAS files, detect formations, predict porosity and saturation, and quantify uncertainty with an enterprise-grade interface.</p>
+        <div class="tag-grid">
+          <div class="tag-card"><div class="tc-lbl">Multi-track logs</div><div class="tc-val">Plotly</div></div>
+          <div class="tag-card"><div class="tc-lbl">ML inference</div><div class="tc-val">Real-time</div></div>
+          <div class="tag-card"><div class="tc-lbl">Uncertainty</div><div class="tc-val">P10/P50/P90</div></div>
+          <div class="tag-card"><div class="tc-lbl">Formats</div><div class="tc-val">LAS 2.0/3.0</div></div>
+          <div class="tag-card"><div class="tc-lbl">Export</div><div class="tc-val">CSV / PDF</div></div>
+          <div class="tag-card"><div class="tc-lbl">Analysis</div><div class="tc-val">Monte Carlo</div></div>
+        </div>
+      </div>
+
+      <!-- Auth -->
+      <div class="panel">
+        <div class="tabs">
+          <button class="tab active" id="tab-login" onclick="switchTab('login')">Login</button>
+          <button class="tab" id="tab-register" onclick="switchTab('register')">Register</button>
+        </div>
+        <div id="reg-fields">
+          <div class="mb-3">
+            <label class="form-label">Username</label>
+            <input id="username" class="form-control" placeholder="Enter username" autocomplete="username">
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Email address</label>
+          <input id="email" type="email" class="form-control" placeholder="you@company.com" autocomplete="email">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Password</label>
+          <input id="password" type="password" class="form-control" placeholder="••••••••" autocomplete="current-password">
+        </div>
+        <div id="reg-confirm" style="display:none;" class="mb-3">
+          <label class="form-label">Confirm Password</label>
+          <input id="confirm_password" type="password" class="form-control" placeholder="••••••••" autocomplete="new-password">
+        </div>
+        <button class="btn btn-primary w-100" onclick="submitAuth()" id="submitBtn">→ Sign In</button>
+        <div id="msg" class="text-danger"></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+let mode = 'login';
+function switchTab(m){
+  mode = m;
+  document.getElementById('tab-login').classList.toggle('active', m==='login');
+  document.getElementById('tab-register').classList.toggle('active', m==='register');
+  document.getElementById('reg-fields').style.display = m==='register'?'block':'none';
+  document.getElementById('reg-confirm').style.display = m==='register'?'block':'none';
+  document.getElementById('submitBtn').textContent = m==='login'?'→ Sign In':'→ Create Account';
+  document.getElementById('msg').textContent = '';
+}
+async function submitAuth(){
+  const email=document.getElementById('email').value.trim();
+  const password=document.getElementById('password').value.trim();
+  const body = mode==='login'
+    ? {email, password}
+    : {email, password, username:document.getElementById('username').value.trim(), confirm_password:document.getElementById('confirm_password').value.trim()};
+  const res = await fetch('/'+mode, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const data = await res.json().catch(()=>({success:false,message:'Server error'}));
+  if(data.success){ window.location = '/dashboard'; }
+  else { document.getElementById('msg').textContent = data.message||'Authentication failed'; }
+}
+document.addEventListener('keydown', e=>{ if(e.key==='Enter') submitAuth(); });
+</script>
+</body>
+</html>

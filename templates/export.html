@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel glass mb-4">
+  <h3>Export Reports</h3>
+  <p class="mb-0 text-secondary">Download the full active well analysis — prediction CSVs, result graphs, well summary JSON, and all reservoir parameters.</p>
+</div>
+
+<div class="row g-4">
+  <!-- Full ZIP package -->
+  <div class="col-xl-6">
+    <div class="panel glass h-100">
+      <h4 class="mb-2">Full Result Package</h4>
+      <p class="text-secondary mb-3" style="font-size:.9rem;">
+        Downloads a ZIP containing:<br>
+        <span style="color:#9dc8e8;">✔ All prediction CSVs</span> (VSH, Porosity, Saturation, Lithology, Combined)<br>
+        <span style="color:#9dc8e8;">✔ Interactive Plotly graph HTML files</span> (per parameter + combined)<br>
+        <span style="color:#9dc8e8;">✔ Well info &amp; analysis summary JSON</span><br>
+        <span style="color:#9dc8e8;">✔ Raw well log values CSV</span>
+      </p>
+      <button id="downloadFullZip" class="btn btn-primary w-100" style="padding:14px;font-size:1rem;">
+        ⬇ Download Full Report ZIP
+      </button>
+      <div id="zipStatus" class="mt-2" style="font-size:.85rem;color:#9dc8e8;display:none;"></div>
+    </div>
+  </div>
+
+  <!-- Individual exports -->
+  <div class="col-xl-6">
+    <div class="panel glass h-100">
+      <h4 class="mb-3">Individual Exports</h4>
+      <div class="d-grid gap-2">
+        <a class="btn btn-outline-primary" href="/export-predictions/vsh">⬇ Download VSH CSV</a>
+        <a class="btn btn-outline-primary" href="/export-predictions/porosity">⬇ Download Porosity CSV</a>
+        <a class="btn btn-outline-primary" href="/export-predictions/saturation">⬇ Download Water Saturation CSV</a>
+        <a class="btn btn-outline-primary" href="/export-predictions/lithology">⬇ Download Lithology CSV</a>
+        <a class="btn btn-outline-primary" href="/export/csv">⬇ Export Full Analysis CSV</a>
+        <a class="btn btn-outline-primary" href="/export/json">⬇ Export Analysis JSON</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('downloadFullZip').addEventListener('click', function(){
+  const btn = this;
+  const status = document.getElementById('zipStatus');
+  btn.disabled = true;
+  btn.textContent = '⏳ Preparing ZIP…';
+  status.style.display = 'block';
+  status.textContent = 'Computing all predictions and generating graphs — this may take a few seconds…';
+  window.location.href = '/export-report/full-zip';
+  setTimeout(()=>{
+    btn.disabled = false;
+    btn.textContent = '⬇ Download Full Report ZIP';
+    status.textContent = '✅ Download started. Check your downloads folder.';
+  }, 3500);
+});
+</script>
+{% endblock %}

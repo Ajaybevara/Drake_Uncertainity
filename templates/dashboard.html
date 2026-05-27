@@ -1,0 +1,60 @@
+
+{% extends 'base.html' %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-xl-4">
+    <div class="panel glass">
+      <h4 class="mb-3">LAS Upload</h4>
+      <form id="uploadForm" enctype="multipart/form-data">
+        <div id="dropZone" class="border rounded p-4 text-center mb-3" style="border-style:dashed !important; cursor:pointer;">
+          <div class="mb-2">Drag & Drop LAS File Here</div>
+          <div class="text-secondary small">or browse to upload .las / .LAS</div>
+          <input id="fileInput" class="form-control mt-3" type="file" name="file" accept=".las,.LAS">
+        </div>
+        <div class="progress mb-3" style="height:10px;"><div id="uploadProgress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width:0%"></div></div>
+        <button class="btn btn-primary w-100" type="submit">Upload LAS File</button>
+      </form>
+      <div id="uploadMsg" class="mt-3 text-secondary">Upload a LAS file to begin analysis.</div>
+    </div>
+  </div>
+</div>
+<div class="row g-4 mt-1">
+  <div class="col-xl-8">
+    <div class="panel glass mb-4"><h4 class="mb-3">Well Information</h4><div id="wellInfoPanel" class="small"></div></div>
+    <div class="panel glass mb-4"><h4 class="mb-3">Analysis Summary</h4><div id="summaryPanel" class="small"></div></div>
+    <div class="panel glass mb-4"><h4 class="mb-3">Depth Analysis</h4><div id="depthPanel" class="small"></div></div>
+    <div class="panel glass"><h4 class="mb-3">Analysis History</h4><div class="table-responsive"><table class="table table-hover border align-middle" id="historyTable"><thead><tr><th>File Name</th><th>Upload Time</th><th>Well Name</th><th>Total Logs</th><th>Analysis Date</th><th>Actions</th></tr></thead><tbody></tbody></table></div></div>
+  </div>
+  <div class="col-xl-4">
+    <div class="panel glass mb-4"><h4 class="mb-3">Log Property Analysis</h4><div id="statsPanel" style="max-height:920px; overflow:auto;"></div></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const uploadForm=document.getElementById('uploadForm');
+const fileInput=document.getElementById('fileInput');
+const dropZone=document.getElementById('dropZone');
+const uploadMsg=document.getElementById('uploadMsg');
+const uploadProgress=document.getElementById('uploadProgress');
+let activeTaskId=null;
+function val(v){return (v===null||v===undefined||v==='')?'N/A':v;}
+function num(v){return (v===null||v===undefined||Number.isNaN(Number(v)))?'N/A':Number(v).toFixed(4);}
+function keyLabel(k){return String(k).replace(/_/g,' ').replace(/\w/g,m=>m.toUpperCase());}
+function kvHtml(obj){const entries=Object.entries(obj||{}); if(!entries.length) return '<div class="text-secondary">No results available.</div>'; return entries.map(([k,v])=>`<div class="d-flex justify-content-between border-bottom py-2 gap-3"><span class="text-secondary">${keyLabel(k)}</span><span class="text-end">${val(v)}</span></div>`).join('');}
+function renderWellInfo(info){document.getElementById('wellInfoPanel').innerHTML=kvHtml(info);}
+function renderSummary(summary){document.getElementById('summaryPanel').innerHTML=kvHtml(summary);}
+function renderDepth(depth){document.getElementById('depthPanel').innerHTML=kvHtml(depth);}
+function renderStats(stats){const entries=Object.entries(stats||{}); document.getElementById('statsPanel').innerHTML=entries.length?entries.map(([name,s])=>`<div class="border rounded p-3 mb-3"><div class="fw-semibold mb-2">${name}</div><div class="small text-secondary">Unit: ${val(s.unit)}</div><div class="small text-secondary">Description: ${val(s.description)}</div><div class="small text-secondary">Min: ${num(s.minimum ?? s.min)}</div><div class="small text-secondary">Max: ${num(s.maximum ?? s.max)}</div><div class="small text-secondary">Mean: ${num(s.mean)}</div><div class="small text-secondary">P10: ${num(s.p10)}</div><div class="small text-secondary">P50: ${num(s.p50)}</div><div class="small text-secondary">P90: ${num(s.p90)}</div><div class="small text-secondary">Valid Samples: ${val(s.valid_samples)}</div></div>`).join(''):'<div class="text-secondary">No log properties available.</div>';}
+function renderHistory(items){document.querySelector('#historyTable tbody').innerHTML=(items||[]).length?(items||[]).map(item=>`<tr><td>${val(item.file_name)}</td><td>${val(item.upload_time)}</td><td>${val(item.well_name)}</td><td>${val(item.total_logs)}</td><td>${val(item.analysis_date)}</td><td><div class="d-flex gap-2"><button class="btn btn-sm btn-outline-info" onclick="loadHistoryItem('${item.id}')">Open</button><button class="btn btn-sm btn-outline-danger" onclick="deleteHistoryItem('${item.id}')">Delete</button></div></td></tr>`).join(''):'<tr><td colspan="6" class="text-secondary text-center">No analysis history yet.</td></tr>';}
+async function refreshHistory(){const r=await fetch('/analysis-history'); const d=await r.json(); if(d.success) renderHistory(d.items||[]);}
+async function refreshCurrent(){const r=await fetch('/current-analysis'); const d=await r.json(); if(!d.success){renderWellInfo({});renderSummary({});renderDepth({});renderStats({}); return;} renderWellInfo(d.well_info||{}); renderSummary(d.summary||{}); renderDepth(d.depth_analysis||{}); renderStats(d.stats||{});}
+async function refreshAll(){await Promise.all([refreshCurrent(), refreshHistory()]);}
+async function loadHistoryItem(id){await fetch(`/analysis-history/${id}/load`,{method:'POST'}); refreshAll();}
+async function deleteHistoryItem(id){await fetch(`/analysis-history/${id}`,{method:'DELETE'}); refreshAll();}
+async function pollTask(){if(!activeTaskId) return; try{const r=await fetch(`/upload-status/${activeTaskId}`); const d=await r.json(); if(d.success){uploadProgress.style.width=`${d.progress||0}%`; uploadMsg.textContent=d.message||'Processing LAS file...'; if(d.status==='completed'){uploadMsg.textContent='Quick preview loaded. Full LAS results are now available.'; activeTaskId=null; uploadProgress.style.width='100%'; await refreshAll(); setTimeout(()=>uploadProgress.style.width='0%',1500); return;} if(d.status==='failed'){uploadMsg.textContent=d.message||'Processing failed.'; activeTaskId=null; uploadProgress.style.width='0%'; return;}}}catch(e){} setTimeout(pollTask,1200);}
+uploadForm.addEventListener('submit',async(e)=>{e.preventDefault(); const file=fileInput.files[0]; if(!file){uploadMsg.textContent='Select a LAS file first.'; return;} const fd=new FormData(); fd.append('file',file); uploadProgress.style.width='10%'; uploadMsg.textContent='Uploading file...'; const r=await fetch('/upload',{method:'POST',body:fd}); const d=await r.json(); if(d.success && d.task_id){activeTaskId=d.task_id; uploadMsg.textContent=d.message||'File uploaded successfully. Quick preview started, then full LAS processing will continue.'; pollTask();} else {uploadMsg.textContent=d.message||'Upload failed.'; uploadProgress.style.width='0%';}});
+dropZone.addEventListener('click',()=>fileInput.click());
+refreshAll();
+</script>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+{% block page_title %}LAS Upload{% endblock %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-5">
+    <div class="glass-panel p-4">
+      <h5>Upload LAS File</h5>
+      <form id="uploadForm">
+        <input type="file" name="file" accept=".las" class="form-control mb-3" required>
+        <button class="btn btn-info w-100" type="submit">Upload and Parse</button>
+      </form>
+      <div id="uploadStatus" class="mt-3 small"></div>
+    </div>
+  </div>
+  <div class="col-lg-7">
+    <div class="glass-panel p-4">
+      <h5>Well Information</h5>
+      <div id="wellInfoGrid" class="well-grid"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const res = await fetch('/upload', { method: 'POST', body: fd });
+  const data = await res.json();
+  document.getElementById('uploadStatus').innerHTML = data.message || 'Done';
+  if (data.success) {
+    renderWellInfo(data.well_info);
+    localStorage.setItem('drakeai_last_file', data.filename);
+  }
+});
+function renderWellInfo(info){
+  const grid = document.getElementById('wellInfoGrid');
+  grid.innerHTML = Object.entries(info).map(([k,v]) => `<div class="well-row"><span class="well-key">${k}</span><span class="well-sep">:</span><span class="well-val">${v}</span></div>`).join('');
+}
+fetch('/well-info').then(r=>r.json()).then(d=>{ if(d.success) renderWellInfo(d.well_info); });
+</script>
+{% endblock %}

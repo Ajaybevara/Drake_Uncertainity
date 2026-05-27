@@ -1,0 +1,870 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="panel glass mb-3">
+  <h3 class="mb-1">AI Log Visualization</h3>
+  <p class="mb-0" style="font-size:.88rem;color:#7a9bbf;">Select logs below — click a log pill to add it as a track. Resistivity logs auto-use logarithmic scale.</p>
+</div>
+
+<!-- TAB NAV -->
+<ul class="nav nav-tabs mb-3" id="vizTabs" style="border-bottom:1px solid rgba(63,163,255,.18);">
+  <li class="nav-item"><button class="nav-link active" data-tab="viewer">Log Viewer</button></li>
+  <li class="nav-item"><button class="nav-link" data-tab="summary">Log Ranges &amp; Properties</button></li>
+</ul>
+
+<!-- ═══════════ LOG VIEWER TAB ═══════════ -->
+<div id="tab-viewer">
+  <div class="panel glass mb-3">
+
+    <div id="vizWarnings" class="mb-2"></div>
+    <div id="vizStatus" class="small mb-3" style="color:#2a5a8a;"></div>
+
+    <!-- ── AVAILABLE LOGS SECTION ── -->
+    <div class="vz-section-label">Available Logs</div>
+    <div class="vz-toolbar mb-2">
+      <span class="vz-btn" onclick="addDefaultLogs()">+ Add Standard</span>
+      <span class="vz-btn danger" onclick="clearAllTracks()">✕ Clear All</span>
+      <!-- Type filters -->
+      <div class="vz-filters">
+        <span class="vz-filter active" data-f="all">All</span>
+        <span class="vz-filter" data-f="gr" style="color:#1a7a38;border-color:rgba(26,138,64,.35);">GR</span>
+        <span class="vz-filter" data-f="resistivity" style="color:#8a6000;border-color:rgba(176,120,0,.35);">RES</span>
+        <span class="vz-filter" data-f="density" style="color:#1a5acc;border-color:rgba(26,90,204,.35);">DEN</span>
+        <span class="vz-filter" data-f="neutron" style="color:#007aaa;border-color:rgba(0,122,170,.35);">NEU</span>
+        <span class="vz-filter" data-f="sonic" style="color:#7a20cc;border-color:rgba(122,32,204,.35);">SON</span>
+        <span class="vz-filter" data-f="caliper" style="color:#cc2244;border-color:rgba(204,34,68,.35);">CAL</span>
+        <span class="vz-filter" data-f="sp" style="color:#cc00aa;border-color:rgba(204,0,170,.35);">SP</span>
+        <span class="vz-filter" data-f="other" style="color:#2a6aaa;border-color:rgba(42,106,170,.3);">Other</span>
+      </div>
+    </div>
+    <!-- Available log pills (click to add) -->
+    <div id="availablePills" class="vz-pills-row mb-3"></div>
+
+    <!-- ── ACTIVE TRACKS — Drake-AI style tag selection bar ── -->
+    <div id="activeTracksSection" style="display:none;">
+      <div class="vz-section-label" style="margin-bottom:6px;">
+        Active Tracks
+        <span id="trackCountBadge" class="vz-count-badge">0</span>
+      </div>
+      <!-- Tag-style selection bar (like Image 3 reference) -->
+      <div class="vz-tagbar" id="trackTagBar"></div>
+      <!-- ── DEPTH RANGE SELECTOR ── -->
+      <div id="depthRangeSection" style="display:none;margin-top:14px;">
+        <div class="vz-section-label" style="margin-bottom:8px;">Depth Range (Y-Axis)</div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <label style="font-size:.8rem;color:#4a6a8a;font-weight:600;white-space:nowrap;">Unit:</label>
+            <select id="vzDepthUnit" style="font-size:.8rem;padding:3px 8px;border-radius:6px;border:1px solid rgba(42,106,170,.3);background:rgba(240,246,255,.9);color:#1a4a7a;min-width:90px;">
+              <option value="m">Meters (m)</option>
+              <option value="ft">Feet (ft)</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <label id="depthMinLabel" style="font-size:.8rem;color:#4a6a8a;font-weight:600;white-space:nowrap;">Min Depth (m):</label>
+            <input type="number" id="depthMinInput" class="vz-depth-input" placeholder="Auto" step="1">
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <label id="depthMaxLabel" style="font-size:.8rem;color:#4a6a8a;font-weight:600;white-space:nowrap;">Max Depth (m):</label>
+            <input type="number" id="depthMaxInput" class="vz-depth-input" placeholder="Auto" step="1">
+          </div>
+          <span class="vz-btn" onclick="resetDepthRange()" style="font-size:.76rem;padding:4px 11px;background:rgba(100,160,220,.09);color:#2a6a9a;border-color:rgba(42,106,170,.28);">↺ Reset</span>
+          <span id="depthRangeHint" style="font-size:.76rem;color:#7a9bbf;font-style:italic;"></span>
+        </div>
+      </div>
+
+      <div class="vz-toolbar mt-2">
+        <button id="btnPlot" class="vz-plot-btn">▶ Plot Tracks</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── CHART PANEL ── -->
+  <div class="panel glass mb-3" id="chartPanel" style="display:none;">
+    <div id="mainChart" style="width:100%;height:870px;"></div>
+  </div>
+
+  <!-- ── AI INTERPRETATION ── -->
+  <div class="panel glass mb-3" id="aiInterpBox" style="display:none;">
+    <h4 class="mb-3">AI Assisted Log Interpretation</h4>
+    <ul id="aiInterpList" class="list-unstyled mb-0" style="font-size:.9rem;line-height:1.9;"></ul>
+  </div>
+</div>
+
+<!-- ═══════════ SUMMARY TAB ═══════════ -->
+<div id="tab-summary" style="display:none;">
+  <div class="panel glass mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h4 class="mb-0">Log Ranges and Properties</h4>
+      <button id="btnDownloadSummary" class="btn btn-outline-primary btn-sm">Download Summary CSV</button>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover border" style="font-size:.87rem;">
+        <thead><tr><th>Curve</th><th>Description</th><th>Unit</th><th>Min</th><th>Max</th><th>Mean</th><th>Median</th><th>Std Dev</th><th>Nulls</th><th>Valid</th><th>Type</th><th>Scale Range</th><th>Scale</th></tr></thead>
+        <tbody id="summaryBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════ STYLES ════════════════════════════ -->
+<style>
+/* Tab nav */
+#vizTabs .nav-link{background:transparent;color:#9dc8e8;border:1px solid transparent;border-radius:10px 10px 0 0;padding:9px 22px;font-size:.9rem;}
+#vizTabs .nav-link.active{background:linear-gradient(90deg,rgba(24,127,187,.22),rgba(63,163,255,.08));border-color:rgba(63,163,255,.28)!important;color:#fff!important;}
+#vizTabs .nav-link:hover{color:#fff!important;}
+
+/* Section label */
+.vz-section-label{font-size:.78rem;color:#1a5a8a;text-transform:uppercase;letter-spacing:.08em;font-weight:700;margin-bottom:8px;}
+
+/* Toolbar row */
+.vz-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+
+/* Small action buttons */
+.vz-btn{display:inline-flex;align-items:center;padding:4px 12px;border-radius:14px;font-size:.78rem;font-weight:600;cursor:pointer;border:1px solid rgba(26,127,204,.3);background:rgba(26,127,204,.08);color:#1a5aaa;transition:all .15s;user-select:none;}
+.vz-btn:hover{background:rgba(26,127,204,.18);color:#1a3a8a;}
+.vz-btn.danger{background:rgba(200,50,50,.07);color:#cc2222;border-color:rgba(200,50,50,.25);}
+.vz-btn.danger:hover{background:rgba(200,50,50,.16);color:#aa0000;}
+
+/* Type filter pills */
+.vz-filters{display:flex;flex-wrap:wrap;gap:4px;margin-left:4px;}
+.vz-filter{display:inline-flex;align-items:center;padding:3px 10px;border-radius:10px;font-size:.74rem;font-weight:700;cursor:pointer;border:1px solid rgba(26,80,160,.18);color:#2a5a8a;background:rgba(26,80,160,.05);transition:all .15s;user-select:none;}
+.vz-filter:hover{color:#1a3a6a;background:rgba(26,80,160,.12);border-color:rgba(26,80,160,.3);}
+.vz-filter.active{background:rgba(63,163,255,.18);border-color:#3fa3ff!important;color:#1a5aaa!important;}
+
+/* Available log pills row */
+.vz-pills-row{display:flex;flex-wrap:wrap;gap:7px;min-height:32px;}
+
+/* Individual available pill */
+.avail-pill{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:5px 13px;border-radius:20px;font-size:.81rem;font-weight:600;cursor:pointer;
+  border:1.5px solid rgba(26,80,160,.18);color:#2a4a7a;background:rgba(26,80,160,.06);
+  transition:all .18s;user-select:none;position:relative;
+}
+.avail-pill:hover{border-color:rgba(26,80,160,.45);color:#1a3a6a;transform:translateY(-1px);box-shadow:0 3px 12px rgba(0,0,0,.12);}
+.avail-pill.is-active{opacity:.55;cursor:pointer;}
+.avail-pill.is-active::after{content:'✓';margin-left:3px;font-size:.75rem;}
+.avail-pill .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.avail-pill .stag{font-size:.66rem;padding:1px 4px;border-radius:3px;background:rgba(0,0,0,.12);color:#555;letter-spacing:.02em;}
+
+/* Colour schemes per type */
+.avail-pill[data-type="gr"]          {border-color:rgba(26,138,64,.5);color:#1a7a38;background:rgba(26,138,64,.07);}
+.avail-pill[data-type="resistivity"] {border-color:rgba(176,120,0,.5);color:#8a6000;background:rgba(176,120,0,.07);}
+.avail-pill[data-type="density"]     {border-color:rgba(26,90,204,.5);color:#1a5acc;background:rgba(26,90,204,.07);}
+.avail-pill[data-type="neutron"]     {border-color:rgba(0,122,170,.5);color:#007aaa;background:rgba(0,122,170,.07);}
+.avail-pill[data-type="sonic"]       {border-color:rgba(122,32,204,.5);color:#7a20cc;background:rgba(122,32,204,.07);}
+.avail-pill[data-type="caliper"]     {border-color:rgba(204,34,68,.5);color:#cc2244;background:rgba(204,34,68,.07);}
+.avail-pill[data-type="sp"]          {border-color:rgba(204,0,170,.5);color:#cc00aa;background:rgba(204,0,170,.07);}
+.avail-pill[data-type="pe"]          {border-color:rgba(204,85,0,.5);color:#cc5500;background:rgba(204,85,0,.07);}
+.avail-pill[data-type="other"]       {border-color:rgba(42,106,170,.4);color:#2a6aaa;background:rgba(42,106,170,.06);}
+
+/* ── ACTIVE TRACKS TAG BAR (Drake AI style — Image 3) ── */
+.vz-tagbar{
+  display:flex;flex-wrap:wrap;gap:7px;
+  min-height:44px;
+  padding:10px 14px;
+  border-radius:14px;
+  border:1.5px solid rgba(63,163,255,.2);
+  background:rgba(8,18,28,.6);
+}
+.vz-tagbar:empty{border-style:dashed;}
+
+/* Individual active tag */
+.track-tag{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:5px 11px;border-radius:20px;font-size:.82rem;font-weight:700;
+  border:1.5px solid;cursor:default;
+  transition:all .15s;
+}
+.track-tag .tag-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.track-tag .tag-scale{font-size:.68rem;font-weight:700;padding:1px 4px;border-radius:3px;background:rgba(0,0,0,.40);color:#fff;letter-spacing:.03em;margin-left:1px;}
+.track-tag .tag-x{cursor:pointer;margin-left:4px;font-size:.88rem;line-height:1;opacity:.7;color:#fff;transition:opacity .1s;}
+.track-tag .tag-x:hover{opacity:1;color:#ff6666;}
+
+/* Tag colour by type — light text for dark tagbar background */
+.track-tag[data-type="gr"]          {border-color:rgba(49,209,124,.55);background:rgba(26,138,64,.22);color:#82ffaa;}
+.track-tag[data-type="resistivity"] {border-color:rgba(245,197,66,.55);background:rgba(176,120,0,.22);color:#f5c542;}
+.track-tag[data-type="density"]     {border-color:rgba(100,150,255,.55);background:rgba(26,90,204,.22);color:#99c0ff;}
+.track-tag[data-type="neutron"]     {border-color:rgba(0,209,255,.55);background:rgba(0,122,170,.22);color:#82eeff;}
+.track-tag[data-type="sonic"]       {border-color:rgba(199,146,255,.55);background:rgba(122,32,204,.22);color:#c792ff;}
+.track-tag[data-type="caliper"]     {border-color:rgba(255,122,144,.55);background:rgba(204,34,68,.22);color:#ff9db0;}
+.track-tag[data-type="sp"]          {border-color:rgba(255,79,216,.55);background:rgba(204,0,170,.22);color:#ff4fd8;}
+.track-tag[data-type="pe"]          {border-color:rgba(255,160,80,.55);background:rgba(204,85,0,.22);color:#ffaa55;}
+.track-tag[data-type="other"]       {border-color:rgba(158,195,255,.4);background:rgba(42,106,170,.20);color:#9ec3ff;}
+
+/* Count badge */
+.vz-count-badge{display:inline-flex;align-items:center;padding:1px 8px;border-radius:10px;font-size:.73rem;font-weight:700;background:rgba(63,163,255,.15);color:#7ec8ff;border:1px solid rgba(63,163,255,.25);margin-left:6px;vertical-align:middle;}
+
+/* Plot button */
+.vz-plot-btn{padding:7px 26px;border-radius:12px;font-size:.88rem;font-weight:700;cursor:pointer;background:linear-gradient(135deg,#1a80d0,#0f5fa0);color:#fff;border:1px solid rgba(63,163,255,.4);transition:all .15s;box-shadow:0 2px 12px rgba(20,100,200,.25);}
+.vz-plot-btn:hover{background:linear-gradient(135deg,#2090e0,#1570b8);box-shadow:0 4px 18px rgba(20,100,200,.4);}
+.vz-plot-btn:disabled{opacity:.5;cursor:not-allowed;}
+
+/* Warning badge */
+.warn-badge{display:inline-block;padding:6px 12px;border-radius:10px;background:rgba(245,197,66,.12);border:1px solid rgba(245,197,66,.25);color:#f8d878;font-size:.84rem;margin-bottom:6px;}
+
+/* Depth range inputs */
+.vz-depth-input{width:110px;padding:5px 10px;border-radius:10px;border:1.5px solid rgba(63,163,255,.25);background:#f4f8fd;color:#1a2540;font-size:.83rem;font-weight:600;outline:none;transition:border-color .15s;}
+.vz-depth-input:focus{border-color:#1a7fcc;box-shadow:0 0 0 3px rgba(26,127,204,.10);}
+.vz-depth-input::placeholder{color:#9ab0c8;font-weight:400;}
+</style>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<script>
+// ══════════════════════════════════════════════════════════════
+//  UTILITIES
+// ══════════════════════════════════════════════════════════════
+const safeJson=(r,fb)=>{const ct=r.headers.get('content-type')||'';if(!r.ok||!ct.includes('json'))return Promise.resolve(fb);return r.json().catch(()=>fb);};
+const fmtN=(v,d=4)=>(v===null||v===undefined||isNaN(Number(v)))?'N/A':Number(v).toFixed(d);
+function fileDownload(url,name){fetch(url,{credentials:'same-origin'}).then(r=>{if(!r.ok)throw 0;return r.blob();}).then(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=name;a.click();}).catch(()=>alert('Download failed'));}
+
+// Tab switching
+document.querySelectorAll('#vizTabs .nav-link').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('#vizTabs .nav-link').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    const t=btn.dataset.tab;
+    ['viewer','summary'].forEach(id=>{
+      const el=document.getElementById('tab-'+id);
+      if(el)el.style.display=id===t?'block':'none';
+    });
+    if(t==='summary')loadSummary();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+//  LOG TYPE DETECTION
+// ══════════════════════════════════════════════════════════════
+const TYPE_LISTS={
+  gr:         ['GR','GRD','GRS','GRR','CGR','SGR','HSGR','GRC','GAMMA','GAMMARAY'],
+  resistivity:['RT','RESD','RDEP','RDEEP','ILD','LLD','AT90','AHT90','HDRS','RILD','RLLD','RLA5','RLA4','RLA3','RLA2','RLA1','MSFL','RXO','RSHAL','ILM','LLM','RMED','RSHA','LL8','RILM','RHLL'],
+  density:    ['RHOB','RHOZ','DEN','ZDEN','RHOG','DRHOB','DRHO','DRHOB'],
+  drho:       ['DRHO','DRHOB'],   // delta density — separate so we don't log-filter it
+  neutron:    ['NPHI','NPHISS','NPHIS','NPL','TNPH','TNPHI','CNPOR','CNC','NPOR','CNCF','PHIN','BPHI'],
+  sonic:      ['DT','DTC','DTP','DTCO','AC','SONIC','DTSM','DTL'],
+  caliper:    ['CAL','CALI','CALX','CALY','CALD','CALS'],
+  pe:         ['PE','PEF','PEFZ'],
+  sp:         ['SP'],
+};
+
+function detectType(name){
+  const u=name.toUpperCase();
+  // Exact match first to avoid partial collisions (e.g. DRHO vs RHOB)
+  for(const[type,arr]of Object.entries(TYPE_LISTS)){
+    if(arr.some(c=>c.toUpperCase()===u))return type;
+  }
+  // Then prefix/suffix match
+  for(const[type,arr]of Object.entries(TYPE_LISTS)){
+    if(arr.some(c=>{const cu=c.toUpperCase();return u.startsWith(cu)||cu.startsWith(u);}))return type;
+  }
+  return 'other';
+}
+
+// Industry-standard display settings per type
+const TYPE_PROPS={
+  gr:         {xmin:0,    xmax:200,  scale:'linear',unit:'API',   color:'#1a8a40', reverse:false},
+  resistivity:{xmin:0.2,  xmax:2000, scale:'log',   unit:'ohm.m', color:'#b07800', reverse:false},
+  density:    {xmin:1.85, xmax:2.95, scale:'linear',unit:'g/cc',  color:'#1a5acc', reverse:false},
+  drho:       {xmin:-0.20,xmax:0.20, scale:'linear',unit:'g/cc',  color:'#2a44aa', reverse:false},
+  neutron:    {xmin:0.45, xmax:-0.15,scale:'linear',unit:'frac',  color:'#007aaa', reverse:true},
+  sonic:      {xmin:40,   xmax:160,  scale:'linear',unit:'us/ft', color:'#7a20cc', reverse:false},
+  caliper:    {xmin:6,    xmax:16,   scale:'linear',unit:'in',    color:'#cc2244', reverse:false},
+  pe:         {xmin:0,    xmax:10,   scale:'linear',unit:'b/e',   color:'#cc5500', reverse:false},
+  sp:         {xmin:-100, xmax:50,   scale:'linear',unit:'mV',    color:'#cc00aa', reverse:false},
+  other:      {xmin:null, xmax:null, scale:'linear',unit:'',      color:'#2a6aaa', reverse:false},
+};
+
+// Distinct colours for multi-resistivity overlay
+const RES_COLORS=['#b07800','#cc4400','#007aaa','#7a20cc','#1a8a40','#cc2244'];
+
+// ══════════════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════════════
+let ALL_LOGS=[];       // all curve names from LAS (no DEPTH)
+let LOG_META={};       // name → {type, xmin, xmax, scale, unit, color, reverse}
+let ACTIVE_TRACKS=[];  // ordered list of names to plot
+let ALL_ROWS=[];
+let CURVE_META=[];
+let activeFilter='all';
+let LAS_DEPTH_MIN=null;  // real depth bounds from LAS
+let LAS_DEPTH_MAX=null;
+
+// ══════════════════════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════════════════════
+async function initViewer(){
+  const statusEl=document.getElementById('vizStatus');
+  statusEl.textContent='Loading LAS file…';
+  try{
+    const[detailRes,summaryRes]=await Promise.all([
+      fetch('/analysis-detail',{credentials:'same-origin'}).then(r=>safeJson(r,{success:false})).catch(()=>({success:false})),
+      fetch('/las-log-summary',{credentials:'same-origin'}).then(r=>safeJson(r,{success:false})).catch(()=>({success:false})),
+    ]);
+    if(!detailRes.success){
+      statusEl.textContent=detailRes.message||'No LAS file loaded. Please upload a LAS file first.';
+      return;
+    }
+    ALL_LOGS=(detailRes.analysis.log_names||[]).filter(n=>n.toUpperCase()!=='DEPTH');
+
+    // Build metadata for every log
+    ALL_LOGS.forEach(name=>{
+      const type=detectType(name);
+      const props=TYPE_PROPS[type]||TYPE_PROPS.other;
+      let xmin=props.xmin, xmax=props.xmax;
+      // Override with actual data range if available from summary
+      if(summaryRes.success&&summaryRes.summary){
+        const s=summaryRes.summary.find(r=>r.curve===name);
+        if(s&&s.suggested_xmin!==null&&s.suggested_xmin!==undefined){
+          xmin=s.suggested_xmin;
+          xmax=s.suggested_xmax;
+        }
+      }
+      LOG_META[name]={type,xmin,xmax,scale:props.scale,unit:props.unit,color:props.color,reverse:props.reverse};
+    });
+
+    // Capture depth range from analysis detail if available
+    if(detailRes.analysis.start_depth!==undefined&&detailRes.analysis.end_depth!==undefined){
+      LAS_DEPTH_MIN=Number(detailRes.analysis.start_depth);
+      LAS_DEPTH_MAX=Number(detailRes.analysis.end_depth);
+    } else if(summaryRes.success&&summaryRes.summary){
+      // Fallback: read from a depth-like curve if present
+      const dc=summaryRes.summary.find(r=>r.curve==='DEPTH'||r.curve==='DEPT');
+      if(dc){LAS_DEPTH_MIN=Number(dc.min);LAS_DEPTH_MAX=Number(dc.max);}
+    }
+    if(LAS_DEPTH_MIN!==null)updateDepthRangeHint();
+
+    renderAvailablePills();
+    setupFilters();
+    statusEl.textContent=`${ALL_LOGS.length} log curves detected — click a log to add it as a track.`;
+
+    // AI interpretation
+    if(summaryRes.success&&summaryRes.interpretation){
+      const box=document.getElementById('aiInterpBox');
+      box.style.display='block';
+      document.getElementById('aiInterpList').innerHTML=summaryRes.interpretation.map(m=>`<li>${m}</li>`).join('');
+    }
+
+    // Default: show 4-5 logs on first load
+    addDefaultLogs();
+
+  }catch(err){
+    statusEl.textContent='Error: '+err.message;
+    document.getElementById('vizWarnings').innerHTML=`<div class="warn-badge">❌ ${err.message}</div>`;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  DEFAULT LOGS — 4-5 standard logs, ONE resistivity only
+// ══════════════════════════════════════════════════════════════
+function addDefaultLogs(){
+  // Priority order: GR first, then ONE resistivity, then density, neutron, sonic
+  const PRIO_ORDER=['gr','resistivity','density','neutron','sonic'];
+  const byType={};
+  ALL_LOGS.forEach(n=>{const t=detectType(n);if(!byType[t])byType[t]=[];byType[t].push(n);});
+
+  ACTIVE_TRACKS=[];
+  PRIO_ORDER.forEach(type=>{
+    if(byType[type]&&byType[type].length>0){
+      // ONLY add ONE log per type (especially ONE resistivity)
+      const pick=byType[type][0];
+      if(!ACTIVE_TRACKS.includes(pick))ACTIVE_TRACKS.push(pick);
+    }
+  });
+  // Fallback: if < 3 tracks, add a few more
+  if(ACTIVE_TRACKS.length<3){
+    ALL_LOGS.forEach(n=>{if(ACTIVE_TRACKS.length<5&&!ACTIVE_TRACKS.includes(n))ACTIVE_TRACKS.push(n);});
+  }
+  renderAll();
+}
+
+// ══════════════════════════════════════════════════════════════
+//  FILTER BUTTONS
+// ══════════════════════════════════════════════════════════════
+function setupFilters(){
+  document.querySelectorAll('.vz-filter').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      document.querySelectorAll('.vz-filter').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      activeFilter=btn.dataset.f;
+      renderAvailablePills();
+    });
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+//  RENDER AVAILABLE PILLS
+// ══════════════════════════════════════════════════════════════
+function renderAvailablePills(){
+  const container=document.getElementById('availablePills');
+  const filtered=activeFilter==='all'
+    ?ALL_LOGS
+    :ALL_LOGS.filter(n=>detectType(n)===activeFilter);
+
+  if(!filtered.length){
+    container.innerHTML='<span style="color:#4a6a8a;font-size:.82rem;font-style:italic;">No logs of this type in LAS file.</span>';
+    return;
+  }
+
+  container.innerHTML=filtered.map(name=>{
+    const type=detectType(name);
+    const m=LOG_META[name]||{};
+    const isActive=ACTIVE_TRACKS.includes(name);
+    const isLog=m.scale==='log';
+    const dotColor=(TYPE_PROPS[type]||TYPE_PROPS.other).color;
+    return `<span class="avail-pill${isActive?' is-active':''}" data-type="${type}" data-log="${name}"
+        onclick="toggleLog('${name}')"
+        title="${type.toUpperCase()} | Scale: ${isLog?'LOG ('+m.xmin+'–'+m.xmax+' ohm.m)':m.xmin+'–'+m.xmax}">
+      <span class="dot" style="background:${dotColor};"></span>
+      ${name}
+      ${isLog?'<span class="stag" style="color:#f5c542;">LOG</span>':''}
+    </span>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  RENDER ACTIVE TRACK TAGS (Drake AI reference style)
+// ══════════════════════════════════════════════════════════════
+function renderTrackTags(){
+  const section=document.getElementById('activeTracksSection');
+  const tagbar=document.getElementById('trackTagBar');
+  const badge=document.getElementById('trackCountBadge');
+
+  if(!ACTIVE_TRACKS.length){
+    section.style.display='none';
+    document.getElementById('depthRangeSection').style.display='none';
+    return;
+  }
+  section.style.display='block';
+  document.getElementById('depthRangeSection').style.display='block';
+  badge.textContent=ACTIVE_TRACKS.length;
+
+  tagbar.innerHTML=ACTIVE_TRACKS.map(name=>{
+    const type=detectType(name);
+    const m=LOG_META[name]||{};
+    const dotColor=(TYPE_PROPS[type]||TYPE_PROPS.other).color;
+    const scaleLabel=m.scale==='log'
+      ?`<span class="tag-scale" style="color:#f5c542;">LOG</span>`
+      :`<span class="tag-scale" style="color:#5a8aaa;">LIN</span>`;
+    return `<span class="track-tag" data-type="${type}" title="Click × to remove ${name}">
+      <span class="tag-dot" style="background:${dotColor};"></span>
+      ${name}
+      ${scaleLabel}
+      <span class="tag-x" onclick="removeTrack('${name}')" title="Remove ${name}">✕</span>
+    </span>`;
+  }).join('');
+}
+
+function renderAll(){
+  renderAvailablePills();
+  renderTrackTags();
+}
+
+// ══════════════════════════════════════════════════════════════
+//  ADD / REMOVE
+// ══════════════════════════════════════════════════════════════
+function toggleLog(name){
+  if(ACTIVE_TRACKS.includes(name)){
+    removeTrack(name);
+  }else{
+    ACTIVE_TRACKS.push(name);
+    renderAll();
+  }
+}
+
+function removeTrack(name){
+  ACTIVE_TRACKS=ACTIVE_TRACKS.filter(n=>n!==name);
+  renderAll();
+  if(!ACTIVE_TRACKS.length){
+    document.getElementById('chartPanel').style.display='none';
+  }
+}
+
+function clearAllTracks(){
+  ACTIVE_TRACKS=[];
+  renderAll();
+  document.getElementById('chartPanel').style.display='none';
+}
+
+// ══════════════════════════════════════════════════════════════
+//  PLOT BUTTON
+// ══════════════════════════════════════════════════════════════
+document.getElementById('btnPlot').addEventListener('click',plotTracks);
+
+async function plotTracks(){
+  if(!ACTIVE_TRACKS.length){alert('Please add at least one log track.');return;}
+  const btn=document.getElementById('btnPlot');
+  btn.disabled=true;btn.textContent='Loading data…';
+  try{
+    const res=await fetch('/las-log-data?curves='+encodeURIComponent(ACTIVE_TRACKS.join(',')),{credentials:'same-origin'})
+      .then(r=>safeJson(r,{success:false})).catch(e=>({success:false,message:e.message}));
+    if(!res.success){
+      document.getElementById('vizWarnings').innerHTML=`<div class="warn-badge">❌ ${res.message||'Failed to load data'}</div>`;
+      return;
+    }
+    ALL_ROWS=res.records||[];
+    CURVE_META=res.curve_meta||[];
+    if(!ALL_ROWS.length){
+      document.getElementById('vizWarnings').innerHTML='<div class="warn-badge">⚠️ No data rows returned.</div>';
+      return;
+    }
+    // Update depth range from real data if not already known
+    if(LAS_DEPTH_MIN===null){
+      const depths=ALL_ROWS.map(r=>Number(r.DEPTH)).filter(v=>!isNaN(v));
+      if(depths.length){LAS_DEPTH_MIN=Math.min(...depths);LAS_DEPTH_MAX=Math.max(...depths);updateDepthRangeHint();}
+    }
+    document.getElementById('vizWarnings').innerHTML='';
+    buildChart();
+    document.getElementById('chartPanel').style.display='block';
+    const {userMin,userMax}=getDepthRangeInputs();
+    const depthStr=(userMin!==null||userMax!==null)?` | Depth: ${userMin??'auto'}–${userMax??'auto'} m`:'';
+    document.getElementById('vizStatus').textContent=
+      `Displaying ${ACTIVE_TRACKS.length} track(s) — ${ALL_ROWS.length.toLocaleString()} depth points.${depthStr}`;
+  }finally{
+    btn.disabled=false;btn.textContent='▶ Plot Tracks';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  DEPTH RANGE HELPERS
+// ══════════════════════════════════════════════════════════════
+function updateDepthRangeHint(){
+  const hint=document.getElementById('depthRangeHint');
+  const unitSel=document.getElementById('vzDepthUnit');
+  const unit=unitSel?unitSel.value:'m';
+  const VZ_M2FT=3.28084;
+  const toDisplay=v=>unit==='ft'?v*VZ_M2FT:v;
+  const lbl=unit==='ft'?'ft':'m';
+  // Update labels
+  const minLbl=document.getElementById('depthMinLabel');
+  const maxLbl=document.getElementById('depthMaxLabel');
+  if(minLbl) minLbl.textContent=`Min Depth (${lbl}):`;
+  if(maxLbl) maxLbl.textContent=`Max Depth (${lbl}):`;
+  if(!hint)return;
+  if(LAS_DEPTH_MIN!==null&&LAS_DEPTH_MAX!==null){
+    hint.textContent=`LAS file range: ${toDisplay(LAS_DEPTH_MIN).toFixed(1)} – ${toDisplay(LAS_DEPTH_MAX).toFixed(1)} ${lbl}`;
+    const minInp=document.getElementById('depthMinInput');
+    const maxInp=document.getElementById('depthMaxInput');
+    if(minInp)minInp.placeholder=toDisplay(LAS_DEPTH_MIN).toFixed(0);
+    if(maxInp)maxInp.placeholder=toDisplay(LAS_DEPTH_MAX).toFixed(0);
+  }
+}
+
+function getDepthRangeInputs(){
+  const minVal=parseFloat(document.getElementById('depthMinInput').value);
+  const maxVal=parseFloat(document.getElementById('depthMaxInput').value);
+  const unitSel=document.getElementById('vzDepthUnit');
+  const unit=unitSel?unitSel.value:'m';
+  const FT2M=1/3.28084;
+  const toM=v=>unit==='ft'?v*FT2M:v;
+  return{
+    userMin:isNaN(minVal)?null:toM(minVal),
+    userMax:isNaN(maxVal)?null:toM(maxVal),
+    unit
+  };
+}
+
+function resetDepthRange(){
+  document.getElementById('depthMinInput').value='';
+  document.getElementById('depthMaxInput').value='';
+  // Re-plot if chart is visible
+  if(document.getElementById('chartPanel').style.display!=='none'&&ALL_ROWS.length){
+    buildChart();
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  DEPTH AXIS  — 250 m steps, inverted (shallow at top)
+// ══════════════════════════════════════════════════════════════
+function buildDepthAxis(rows){
+  const d=rows.map(r=>Number(r.DEPTH)).filter(v=>!isNaN(v));
+  if(!d.length)return{range:[0,100],tickvals:[],ticktext:[],unit:'m'};
+  const rawMin=Math.min(...d), rawMax=Math.max(...d);
+
+  // Apply user depth range selection
+  const {userMin, userMax, unit}=getDepthRangeInputs();
+  const clampedMin = userMin!==null ? Math.max(userMin, rawMin) : rawMin;
+  const clampedMax = userMax!==null ? Math.min(userMax, rawMax) : rawMax;
+  const effectiveMin = Math.min(clampedMin, clampedMax);
+  const effectiveMax = Math.max(clampedMin, clampedMax);
+
+  const VZ_M2FT=3.28084;
+  const toDisp=v=>unit==='ft'?v*VZ_M2FT:v;
+
+  const STEP=unit==='ft'?1000:250; // 1000 ft steps vs 250 m steps
+  const dispMin=toDisp(effectiveMin), dispMax=toDisp(effectiveMax);
+  const dMin=Math.floor(dispMin/STEP)*STEP;
+  const dMax=Math.ceil(dispMax/STEP)*STEP;
+  const ticks=[];
+  for(let v=dMin;v<=dMax;v+=STEP)ticks.push(v);
+
+  // y values in plot are always in meters (DEPTH column), but we show labels in display unit
+  // We need tickvals in METER space, ticktext in display unit
+  const FT2M=1/VZ_M2FT;
+  const toM=v=>unit==='ft'?v*FT2M:v;
+  const tickvalsM=ticks.map(toM);
+
+  return{range:[toM(dMax),toM(dMin)], tickvals:tickvalsM, ticktext:ticks.map(v=>v.toFixed(0)), unit};
+}
+
+// ══════════════════════════════════════════════════════════════
+//  LOG SCALE AXIS  — Clean petrophysical decade ticks
+//  Range: 0.2 → 2000 gives ticks: 0.2,0.3…0.9,1,2…9,10,20…100,200…1000,2000
+//  FIXED: no extra ticks outside range, no zoom explosion
+// ══════════════════════════════════════════════════════════════
+function makeLogAxis(xmin, xmax, domainArr, titleStr){
+  // Strict safe clamping
+  const sMin=Math.max(Math.abs(xmin),1e-4);
+  const sMax=Math.max(Math.abs(xmax),sMin*10);
+
+  // Only full decades within range
+  const decMin=Math.floor(Math.log10(sMin));
+  const decMax=Math.ceil(Math.log10(sMax));
+
+  const tickvals=[];
+  const ticktext=[];
+
+  for(let dec=decMin;dec<=decMax;dec++){
+    for(let m=1;m<=9;m++){
+      const v=m*Math.pow(10,dec);
+      // Only include if strictly within [sMin*0.999 , sMax*1.001]
+      if(v<sMin*0.999||v>sMax*1.001)continue;
+      tickvals.push(v);
+      // Format labels: always show for m==1 (decade marker); others smaller
+      if(dec<=-2) ticktext.push(v.toFixed(3));
+      else if(dec===-1) ticktext.push(v.toFixed(2));  // 0.20…0.90
+      else if(dec===0)  ticktext.push(v.toFixed(1));  // 1.0…9.0
+      else              ticktext.push(v.toFixed(0));  // 10,20…1000,2000
+    }
+  }
+
+  return{
+    domain:domainArr,
+    title:{text:titleStr,font:{size:9,color:'#7a5500'},standoff:6},
+    type:'log',
+    range:[Math.log10(sMin),Math.log10(sMax)],
+    tickmode:'array',
+    tickvals,
+    ticktext,
+    tickfont:{size:8,color:'#7a5500'},
+    side:'bottom',
+    showgrid:true,
+    gridcolor:'rgba(160,110,0,0.15)',
+    showline:true,
+    linecolor:'rgba(160,110,0,0.30)',
+    zeroline:false,
+    fixedrange:false,   // allow user zoom on that axis only
+    automargin:true,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  LINEAR AXIS BUILDER
+// ══════════════════════════════════════════════════════════════
+function makeLinAxis(xmin, xmax, domainArr, titleStr, color, reverse){
+  let lo=xmin, hi=xmax;
+  if(lo===hi){lo=lo-1;hi=hi+1;}
+  return{
+    domain:domainArr,
+    title:{text:titleStr,font:{size:9,color:color||'#1a5080'},standoff:5},
+    type:'linear',
+    range:reverse?[hi,lo]:[lo,hi],
+    tickfont:{size:8,color:color||'#1a5080'},
+    side:'bottom',
+    showgrid:true,
+    gridcolor:'rgba(26,80,180,0.10)',
+    showline:true,
+    linecolor:'rgba(26,80,180,0.20)',
+    zeroline:false,
+    fixedrange:false,
+    automargin:true,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════
+//  BUILD CHART
+//  KEY RULE: Only ONE resistivity track is shown at a time
+//  (user controls which one via the selection bar)
+//  All non-resistivity logs each get their own separate track
+// ══════════════════════════════════════════════════════════════
+function buildChart(){
+  const {userMin, userMax}=getDepthRangeInputs();
+  const rows=ALL_ROWS.filter(r=>{
+    const d=Number(r.DEPTH);
+    if(isNaN(d))return false;
+    if(userMin!==null&&d<userMin)return false;
+    if(userMax!==null&&d>userMax)return false;
+    return true;
+  });
+  if(!rows.length){
+    document.getElementById('vizWarnings').innerHTML='<div class="warn-badge">⚠️ No data rows in selected depth range.</div>';
+    return;
+  }
+  document.getElementById('vizWarnings').innerHTML='';
+
+  const nT=ACTIVE_TRACKS.length;
+  // Proper gap: use 1% of total width per track as gap, max 0.008
+  const GAP=Math.min(0.008, 0.01/nT);
+  const span=(1.0 - GAP*(nT+1))/nT;   // each track gets equal width minus gaps
+  const depthInfo=buildDepthAxis(rows);
+
+  const traces=[];
+  const layout={
+    paper_bgcolor:'rgba(248,251,255,1)',
+    plot_bgcolor:'rgba(255,255,255,1)',
+    font:{color:'#1a2540',size:10},
+    margin:{l:70,r:20,t:30,b:120},
+    showlegend:true,
+    legend:{orientation:'h',y:1.05,x:0,bgcolor:'rgba(255,255,255,0.9)',font:{size:10,color:'#1a2540'},bordercolor:'rgba(26,127,204,.15)',borderwidth:1},
+    // Shared Y axis (depth)
+    yaxis:{
+      title:{text:'Depth ('+(depthInfo.unit||'m')+')',font:{size:11,color:'#1a2540'}},
+      autorange:false,
+      range:depthInfo.range,
+      tickvals:depthInfo.tickvals,
+      ticktext:depthInfo.ticktext,
+      tickfont:{size:9,color:'#1a2540'},
+      gridcolor:'rgba(26,80,180,0.10)',
+      zeroline:false,
+      showline:true,
+      linecolor:'rgba(26,80,180,0.20)',
+      fixedrange:false,
+    },
+  };
+
+  ACTIVE_TRACKS.forEach((name,ti)=>{
+    const xKey=ti===0?'xaxis':`xaxis${ti+1}`;
+    const xRef=ti===0?'x':`x${ti+1}`;
+    const yRef=ti===0?'y':`y${ti+1}`;
+
+    // Domain: distribute tracks evenly with proper gaps
+    const domStart = GAP + ti*(span+GAP);
+    const domEnd   = domStart + span;
+
+    // Shared Y for all tracks except first uses matches:'y'
+    if(ti>0){
+      layout[`yaxis${ti+1}`]={
+        matches:'y',
+        showticklabels:false,
+        zeroline:false,
+        gridcolor:'rgba(26,80,180,0.08)',
+        fixedrange:false,
+      };
+    }
+
+    const m=LOG_META[name]||{};
+    const cm=CURVE_META.find(c=>c.curve===name)||{};
+    const unit=cm.unit||m.unit||'';
+    const type=detectType(name);
+    const typeColor=(TYPE_PROPS[type]||TYPE_PROPS.other).color;
+
+    // Determine if this type uses log scale
+    const isLogScale = m.scale==='log' && type==='resistivity';
+    // DRHO and density use linear always — never log-filter
+    const isDrho = type==='drho';
+
+    // Get valid values — for log scale only exclude <=0, others include all finite
+    const validVals=rows
+      .map(r=>Number(r[name]))
+      .filter(v=>!isNaN(v) && isFinite(v) && (isLogScale ? v>0 : true));
+
+    let xmin=m.xmin;
+    let xmax=m.xmax;
+    // If meta range is null (rare 'other' type), use data range
+    if(xmin===null||xmin===undefined){
+      xmin=validVals.length?Math.min(...validVals):0;
+    }
+    if(xmax===null||xmax===undefined){
+      xmax=validVals.length?Math.max(...validVals):100;
+    }
+    // For DRHO: if all values are within ±0.05 widen slightly for visibility
+    if(isDrho && xmin===xmax){ xmin=-0.20; xmax=0.20; }
+
+    // ── Build axis spec ──
+    if(isLogScale){
+      // Resistivity: clamp xmin/xmax to safe log range
+      const lmin=Math.max(xmin,0.01);
+      const lmax=Math.max(xmax,lmin*10);
+      layout[xKey]=makeLogAxis(lmin,lmax,[domStart,domEnd],`${name} (${unit})`);
+    }else{
+      layout[xKey]=makeLinAxis(xmin,xmax,[domStart,domEnd],`${name} (${unit})`,typeColor,m.reverse);
+    }
+
+    // ── Build trace — connectgaps:true to avoid extra gaps from null/missing rows ──
+    const validRows=rows.filter(r=>{
+      const v=Number(r[name]);
+      if(r[name]===null||r[name]===undefined||isNaN(v)||!isFinite(v))return false;
+      if(isLogScale && v<=0)return false;
+      return true;
+    });
+
+    traces.push({
+      x:validRows.map(r=>Number(r[name])),
+      y:validRows.map(r=>Number(r.DEPTH)),
+      type:'scattergl',
+      mode:'lines',
+      connectgaps:true,   // FIX: prevents gaps from isolated null points
+      name,
+      xaxis:xRef,
+      yaxis:yRef,
+      line:{width:1.5,color:typeColor},
+      hovertemplate:`<b>${name}</b><br>Depth: %{y:.2f} m<br>Value: %{x:.4g} ${unit}<extra></extra>`,
+    });
+  });
+
+  const config={
+    responsive:true,
+    displaylogo:false,
+    scrollZoom:true,
+    modeBarButtonsToRemove:['select2d','lasso2d'],
+    toImageButtonOptions:{format:'png',width:1600,height:900},
+  };
+
+  Plotly.newPlot('mainChart',traces,layout,config);
+}
+
+// ══════════════════════════════════════════════════════════════
+//  LOG SUMMARY TAB
+// ══════════════════════════════════════════════════════════════
+async function loadSummary(){
+  const res=await fetch('/las-log-summary',{credentials:'same-origin'}).then(r=>safeJson(r,{success:false}));
+  const body=document.getElementById('summaryBody');
+  if(!res.success){body.innerHTML='<tr><td colspan="13" class="text-center text-secondary">No data available.</td></tr>';return;}
+  body.innerHTML=(res.summary||[]).map(r=>`<tr>
+    <td><strong>${r.curve}</strong></td>
+    <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#7a9bbf;">${r.description||''}</td>
+    <td>${r.unit_las||''}</td>
+    <td>${fmtN(r.min)}</td><td>${fmtN(r.max)}</td><td>${fmtN(r.mean)}</td><td>${fmtN(r.median)}</td><td>${fmtN(r.std)}</td>
+    <td>${r.null_count}</td><td>${r.valid_count}</td>
+    <td><span style="padding:2px 8px;border-radius:8px;background:rgba(63,163,255,.12);font-size:.78rem;">${r.log_type||''}</span></td>
+    <td>${r.suggested_xmin!==null?fmtN(r.suggested_xmin)+'–'+fmtN(r.suggested_xmax):'Auto'}</td>
+    <td>${r.suggested_scale||''}</td>
+  </tr>`).join('');
+}
+document.getElementById('btnDownloadSummary').addEventListener('click',()=>fileDownload('/download-log-summary-csv','drakeai_log_summary.csv'));
+
+// Wire vzDepthUnit selector to update hint and re-plot
+(function(){
+  const unitSel=document.getElementById('vzDepthUnit');
+  if(unitSel){
+    unitSel.addEventListener('change',function(){
+      updateDepthRangeHint();
+      // Clear manual depth inputs when unit changes to avoid stale cross-unit values
+      document.getElementById('depthMinInput').value='';
+      document.getElementById('depthMaxInput').value='';
+      if(document.getElementById('chartPanel').style.display!=='none'&&ALL_ROWS.length){
+        buildChart();
+      }
+    });
+  }
+})();
+
+// ══════════════════════════════════════════════════════════════
+//  BOOT
+// ══════════════════════════════════════════════════════════════
+initViewer();
+</script>
+{% endblock %}

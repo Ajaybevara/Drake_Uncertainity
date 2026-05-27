@@ -1,0 +1,983 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="panel glass mb-4">
+  <h3>AI Prediction</h3>
+  <p class="mb-0 text-secondary">Vsh, Porosity, Water Saturation, and Lithology calculation using petrophysical formulas from the active LAS file.</p>
+</div>
+
+<!-- Status Banner -->
+<div id="globalStatus" style="display:none;padding:10px 16px;border-radius:10px;margin-bottom:14px;font-size:.9rem;"></div>
+
+<!-- Tabs -->
+<ul class="nav nav-tabs mb-4" id="predTabs" style="border-bottom:1px solid rgba(26,127,204,.18);">
+  <li class="nav-item"><button class="nav-link active" data-ptab="vsh" style="background:transparent;color:#2a5a8a;border:1px solid transparent;border-radius:10px 10px 0 0;padding:10px 18px;">Vsh</button></li>
+  <li class="nav-item"><button class="nav-link" data-ptab="porosity" style="background:transparent;color:#2a5a8a;border:1px solid transparent;border-radius:10px 10px 0 0;padding:10px 18px;">Porosity</button></li>
+  <li class="nav-item"><button class="nav-link" data-ptab="saturation" style="background:transparent;color:#2a5a8a;border:1px solid transparent;border-radius:10px 10px 0 0;padding:10px 18px;">Saturation</button></li>
+  <li class="nav-item"><button class="nav-link" data-ptab="export" style="background:transparent;color:#2a5a8a;border:1px solid transparent;border-radius:10px 10px 0 0;padding:10px 18px;">Final Export</button></li>
+</ul>
+
+<!-- VSH -->
+<div id="ptab-vsh">
+  <div class="panel glass mb-4"><h4 class="mb-3">Vsh Calculation</h4>
+    <div class="row g-2 mb-3">
+      <div class="col-md-4"><label class="form-label">GR log</label><select id="vshLog" class="form-select"></select></div>
+      <div class="col-md-4"><label class="form-label">GRmin (clean sand)</label><input id="grMin" class="form-control" type="number" step="any" value="20"></div>
+      <div class="col-md-4"><label class="form-label">GRmax (shale)</label><input id="grMax" class="form-control" type="number" step="any" value="120"></div>
+      <div class="col-md-6"><label class="form-label">Vsh method</label>
+        <select id="vshMethod" class="form-select">
+          <option value="linear">Linear</option>
+          <option value="larionov_tertiary">Larionov Tertiary</option>
+          <option value="larionov_older">Larionov Older Rocks</option>
+          <option value="clavier">Clavier</option>
+          <option value="steiber">Steiber</option>
+        </select></div>
+      <div class="col-md-6 d-flex align-items-end"><button id="runVsh" class="btn btn-primary w-100">Calculate Vsh</button></div>
+    </div>
+    <div id="vshFormulaBox" class="panel p-3 mb-3" style="background:rgba(26,127,204,.06);border-radius:12px;font-size:.85rem;color:#1a5a8a;border:1px solid rgba(26,127,204,.14);">
+      <strong>Active Formula:</strong><br>
+      <span id="vshFormulaText">IGR = (GRlog − GRmin) / (GRmax − GRmin) &nbsp;→&nbsp; Vsh = IGR (Linear)</span>
+    </div>
+    <div id="vshDataWarning"></div>
+    <div id="vshResultStats" style="display:none;" class="panel p-3 mb-3" style="background:rgba(26,180,.15);border-radius:10px;font-size:.85rem;color:#1a6a2a;"></div>
+    <div class="row g-2 mb-2 align-items-end" id="vshDepthControls" style="display:none;">
+      <div class="col-md-3"><label class="form-label" style="font-size:.82rem;color:#4a6a8a;font-weight:600;">Depth Unit</label>
+        <select id="vshDepthUnit" class="form-select form-select-sm">
+          <option value="m">Meters (m)</option>
+          <option value="ft">Feet (ft)</option>
+        </select></div>
+      <div class="col-md-3"><label class="form-label" style="font-size:.82rem;color:#4a6a8a;font-weight:600;">Min Depth</label>
+        <input id="vshDepthMin" class="form-control form-control-sm" type="number" step="any" placeholder="Auto"></div>
+      <div class="col-md-3"><label class="form-label" style="font-size:.82rem;color:#4a6a8a;font-weight:600;">Max Depth</label>
+        <input id="vshDepthMax" class="form-control form-control-sm" type="number" step="any" placeholder="Auto"></div>
+      <div class="col-md-3 d-flex align-items-end gap-2">
+        <button class="btn btn-outline-secondary btn-sm w-50" onclick="applyPredDepthFilter('vsh')">Apply</button>
+        <button class="btn btn-outline-secondary btn-sm w-50" onclick="resetPredDepthFilter('vsh')">↺ Reset</button>
+      </div>
+      <div class="col-12"><small id="vshDepthHint" class="text-secondary"></small></div>
+    </div>
+    <div class="table-responsive"><table class="table table-hover border"><thead class="table-light"><tr><th>#</th><th id="vshDepthColHeader">Depth (m)</th><th>GR (API)</th><th>IGR</th><th>VSH</th></tr></thead><tbody id="vshBody"><tr><td colspan="5" class="text-center text-secondary">Click "Calculate Vsh" to compute results.</td></tr></tbody></table></div>
+    <button id="downloadVsh" class="btn btn-outline-primary mt-3 w-100">Download Vsh CSV</button>
+  </div>
+</div>
+
+<!-- POROSITY -->
+<div id="ptab-porosity" style="display:none;">
+  <div class="panel glass mb-4"><h4 class="mb-3">Porosity Calculation</h4>
+    <div class="row g-2 mb-3">
+      <div class="col-md-6"><label class="form-label">Method</label>
+        <select id="porosityMethod" class="form-select">
+          <option value="density">Density Porosity</option>
+          <option value="neutron">Neutron Porosity</option>
+          <option value="sonic">Sonic (Wyllie)</option>
+          <option value="density_neutron">Density-Neutron Average</option>
+        </select></div>
+      <div class="col-md-6"><label class="form-label">Porosity Log (RHOB / NPHI / DT)</label><select id="porosityLogSelect" class="form-select"></select>
+        <input type="hidden" id="rhobLog"><input type="hidden" id="nphiLog"><input type="hidden" id="dtLog">
+      </div>
+      <div class="col-md-3"><label class="form-label">RHOMA (g/cc)</label><input id="rhoma" class="form-control" type="number" step="any" value="2.65"></div>
+      <div class="col-md-3"><label class="form-label">RHOF (g/cc)</label><input id="rhof" class="form-control" type="number" step="any" value="1.0"></div>
+      <div class="col-md-3"><label class="form-label">DTMA (us/ft)</label><input id="dtma" class="form-control" type="number" step="any" value="55.5"></div>
+      <div class="col-md-3"><label class="form-label">DTFL (us/ft)</label><input id="dtfl" class="form-control" type="number" step="any" value="189"></div>
+      <div class="col-md-6"><label class="form-label">NPHI unit</label><select id="nphiUnit" class="form-select"><option value="fraction">already fraction</option><option value="percent">percent (÷100)</option></select></div>
+      <div class="col-md-6 d-flex align-items-end"><button id="runPorosity" class="btn btn-primary w-100">Calculate Porosity</button></div>
+    </div>
+    <div id="porFormulaBox" class="panel p-3 mb-3" style="background:rgba(26,127,204,.06);border-radius:12px;font-size:.85rem;color:#1a5a8a;border:1px solid rgba(26,127,204,.14);">
+      <strong>Active Formula:</strong><br>
+      <span id="porFormulaText">PHIT = (RHOMA − RHOB) / (RHOMA − RHOF) &nbsp;|&nbsp; PHIE = PHIT × (1 − Vsh)</span>
+    </div>
+    <div id="phieWarning" class="small text-warning mb-2"></div>
+    <div id="porResultStats" style="display:none;" class="panel p-3 mb-3" style="background:rgba(26,180,80,.10);border-radius:10px;font-size:.85rem;color:#1a6a2a;"></div>
+    <div class="row g-2 mb-2 align-items-end" id="porDepthControls" style="display:none;">
+      <div class="col-md-3"><label class="form-label" style="font-size:.82rem;color:#4a6a8a;font-weight:600;">Depth Unit</label>
+        <select id="porDepthUnit" class="form-select form-select-sm">
+          <option value="m">Meters (m)</option>
+          <option value="ft">Feet (ft)</option>
+        </select></div>
+      <div class="col-md-3"><label class="form-label" style="font-size:.82rem;color:#4a6a8a;font-weight:600;">Min Depth</label>
+        <input id="porDepthMin" class="form-control form-control-sm" type="number" step="any" placeholder="Auto"></div>
+      <div class="col-md-3"><label class="form-label" style="font-size:.82rem;color:#4a6a8a;font-weight:600;">Max Depth</label>
+        <input id="porDepthMax" class="form-control form-control-sm" type="number" step="any" placeholder="Auto"></div>
+      <div class="col-md-3 d-flex align-items-end gap-2">
+        <button class="btn btn-outline-secondary btn-sm w-50" onclick="applyPredDepthFilter('por')">Apply</button>
+        <button class="btn btn-outline-secondary btn-sm w-50" onclick="resetPredDepthFilter('por')">↺ Reset</button>
+      </div>
+      <div class="col-12"><small id="porDepthHint" class="text-secondary"></small></div>
+    </div>
+    <div class="table-responsive"><table class="table table-hover border"><thead class="table-light"><tr><th>#</th><th id="porDepthColHeader">Depth (m)</th><th>PHIT (Total Porosity)</th><th>PHIE (Effective Porosity)</th></tr></thead><tbody id="porosityBody"><tr><td colspan="4" class="text-center text-secondary">Click "Calculate Porosity" to compute results.</td></tr></tbody></table></div>
+    <button id="downloadPorosity" class="btn btn-outline-primary mt-3 w-100">Download Porosity CSV</button>
+  </div>
+</div>
+
+<!-- SATURATION -->
+<div id="ptab-saturation" style="display:none;">
+  <div class="panel glass mb-4"><h4 class="mb-3">Water Saturation Calculation</h4>
+    <div class="row g-2 mb-3">
+      <div class="col-md-6"><label class="form-label">Method</label>
+        <select id="satMethod" class="form-select">
+          <option value="archie">Archie (clean formations)</option>
+          <option value="indonesia">Indonesia (shaly sands)</option>
+          <option value="auto">Auto (Archie if Vsh≤0.15, else Indonesia)</option>
+        </select></div>
+      <div class="col-md-6"><label class="form-label">Rt log (deep resistivity)</label><select id="rtLog" class="form-select"></select></div>
+      <div class="col-md-3"><label class="form-label">Rw</label><input id="rw" class="form-control" type="number" step="any" value="0.1"></div>
+      <div class="col-md-3"><label class="form-label">Rsh</label><input id="rsh" class="form-control" type="number" step="any" value="2"></div>
+      <div class="col-md-2"><label class="form-label">a</label><input id="satA" class="form-control" type="number" step="any" value="1"></div>
+      <div class="col-md-2"><label class="form-label">m</label><input id="satM" class="form-control" type="number" step="any" value="2"></div>
+      <div class="col-md-2"><label class="form-label">n</label><input id="satN" class="form-control" type="number" step="any" value="2"></div>
+      <div class="col-md-12 d-flex align-items-end"><button id="runSaturation" class="btn btn-primary w-100">Calculate Saturation</button></div>
+    </div>
+    <div class="panel p-3 mb-3" style="background:rgba(26,80,160,.07);border:1px solid rgba(26,80,160,.15);border-radius:12px;font-size:.85rem;color:#1a3a6a;">
+      <strong>Archie:</strong> Sw = ((a × Rw) / (PHIE^m × Rt))^(1/n)<br>
+      <strong>Indonesia:</strong> 1/√Rt = Vsh^(1−Vsh/2)/√Rsh + √(PHIE^m / (a×Rw)) × Sw^(n/2)
+    </div>
+    <div id="saturationFormula" class="small text-secondary mb-2"></div>
+    <div id="satResultStats" style="display:none;" class="panel p-3 mb-3" style="background:rgba(26,180,80,.10);border-radius:10px;font-size:.85rem;color:#1a6a2a;"></div>
+    <div class="row g-2 mb-2 align-items-end" id="satDepthControls" style="display:none;">
+      <div class="col-md-3"><label class="form-label" style="font-size:.82rem;color:#4a6a8a;font-weight:600;">Depth Unit</label>
+        <select id="satDepthUnit" class="form-select form-select-sm">
+          <option value="m">Meters (m)</option>
+          <option value="ft">Feet (ft)</option>
+        </select></div>
+      <div class="col-md-3"><label class="form-label" style="font-size:.82rem;color:#4a6a8a;font-weight:600;">Min Depth</label>
+        <input id="satDepthMin" class="form-control form-control-sm" type="number" step="any" placeholder="Auto"></div>
+      <div class="col-md-3"><label class="form-label" style="font-size:.82rem;color:#4a6a8a;font-weight:600;">Max Depth</label>
+        <input id="satDepthMax" class="form-control form-control-sm" type="number" step="any" placeholder="Auto"></div>
+      <div class="col-md-3 d-flex align-items-end gap-2">
+        <button class="btn btn-outline-secondary btn-sm w-50" onclick="applyPredDepthFilter('sat')">Apply</button>
+        <button class="btn btn-outline-secondary btn-sm w-50" onclick="resetPredDepthFilter('sat')">↺ Reset</button>
+      </div>
+      <div class="col-12"><small id="satDepthHint" class="text-secondary"></small></div>
+    </div>
+    <div class="table-responsive"><table class="table table-hover border"><thead class="table-light"><tr><th>#</th><th id="satDepthColHeader">Depth (m)</th><th>RT (Ω·m)</th><th>SW (Water Sat.)</th><th>Method</th></tr></thead><tbody id="saturationBody"><tr><td colspan="5" class="text-center text-secondary">Click "Calculate Saturation" to compute results.</td></tr></tbody></table></div>
+    <button id="downloadSaturation" class="btn btn-outline-primary mt-3 w-100">Download Saturation CSV</button>
+  </div>
+</div>
+
+<!-- LITHOLOGY -->
+<div id="ptab-lithology" style="display:none;">
+  <div class="panel glass mb-4"><h4 class="mb-3">Lithology Identification</h4>
+    <div class="row g-2 mb-3">
+      <div class="col-md-6"><label class="form-label">VSH source</label><select id="lithGrVsh" class="form-select"><option value="VSH">VSH (from Vsh calculation)</option></select></div>
+      <div class="col-md-6"><label class="form-label">RHOB log</label><select id="lithRhob" class="form-select"></select></div>
+      <div class="col-md-6"><label class="form-label">NPHI log</label><select id="lithNphi" class="form-select"></select></div>
+      <div class="col-md-6"><label class="form-label">DT log</label><select id="lithDt" class="form-select"></select></div>
+      <div class="col-md-6"><label class="form-label">PE / PEF log</label><select id="lithPe" class="form-select"></select></div>
+      <div class="col-md-3"><label class="form-label">Clean VSH max</label><input id="cleanVshMax" class="form-control" type="number" step="any" value="0.30"></div>
+      <div class="col-md-3"><label class="form-label">Shaly VSH max</label><input id="shalyVshMax" class="form-control" type="number" step="any" value="0.50"></div>
+      <div class="col-md-3"><label class="form-label">PHIE min</label><input id="phieMin" class="form-control" type="number" step="any" value="0.10"></div>
+      <div class="col-md-3"><label class="form-label">Coal RHOB max</label><input id="coalRhobMax" class="form-control" type="number" step="any" value="1.80"></div>
+      <div class="col-md-12 d-flex align-items-end"><button id="runLithology" class="btn btn-primary w-100">Identify Lithology</button></div>
+    </div>
+    <div class="panel p-3 mb-3" style="background:rgba(26,80,160,.07);border:1px solid rgba(26,80,160,.15);border-radius:12px;font-size:.85rem;color:#1a3a6a;">
+      <strong>Applied rules:</strong> Coal (RHOB &lt; 1.80) → Dolomite (RHOB 2.80–2.90, PE≈3.0) → Limestone (RHOB 2.68–2.75, PE≈5.0, NPHI≤0.35) → Shale (VSH &gt; 0.50) → Shaly Sand (VSH 0.30–0.50) → Clean Sandstone (VSH ≤ 0.30, PHIE ≥ 0.10, RHOB 2.55–2.70) → Unknown
+    </div>
+    <div id="lithResultStats" style="display:none;" class="panel p-3 mb-3" style="background:rgba(26,180,80,.10);border-radius:10px;font-size:.85rem;color:#1a6a2a;"></div>
+    <div class="table-responsive"><table class="table table-hover border"><thead class="table-light"><tr><th>#</th><th>Depth (m)</th><th>VSH</th><th>RHOB (g/cc)</th><th>LITHOLOGY</th></tr></thead><tbody id="lithologyBody"><tr><td colspan="5" class="text-center text-secondary">Click "Identify Lithology" to compute results.</td></tr></tbody></table></div>
+    <button id="downloadLithology" class="btn btn-outline-primary mt-3 w-100">Download Lithology CSV</button>
+  </div>
+</div>
+
+<!-- EXPORT -->
+<div id="ptab-export" style="display:none;">
+  <div class="panel glass mb-4"><h4 class="mb-3">Final Export — All Reservoir Parameters</h4>
+    <p class="text-secondary">Download all calculated parameters (Depth, GR, IGR, VSH, PHIT, PHIE, RT, SW, SATURATION_METHOD, LITHOLOGY) in one CSV file.</p>
+    <button id="downloadAll" class="btn btn-primary w-100 mb-3" style="padding:14px;font-size:1rem;">Download All Reservoir Parameters CSV</button>
+    <div id="exportPreviewWrap" class="table-responsive mt-3"><table class="table table-hover border"><thead class="table-light"><tr><th>Depth</th><th>GR</th><th>VSH</th><th>PHIT</th><th>PHIE</th><th>RT</th><th>SW</th><th>Method</th><th>Lithology</th></tr></thead><tbody id="exportPreviewBody"></tbody></table></div>
+  </div>
+</div>
+
+<style>
+#predTabs .nav-link{color:#2a5a8a!important;}
+#predTabs .nav-link.active{background:linear-gradient(90deg,rgba(26,127,204,.15),rgba(42,95,204,.08));border-color:rgba(26,127,204,.30)!important;color:#1a7fcc!important;font-weight:600;}
+#predTabs .nav-link:hover{color:#1a7fcc!important;}
+.val-valid{color:#1a9e50;font-weight:500;}
+.val-null{color:#aab;font-style:italic;font-size:.85em;}
+.lith-badge{padding:2px 10px;border-radius:6px;font-size:.82rem;font-weight:600;}
+.lith-shale{background:rgba(180,120,50,.15);color:#8a5a1a;}
+.lith-sand{background:rgba(26,127,204,.14);color:#1a5a8a;}
+.lith-shalyS{background:rgba(60,110,180,.12);color:#2a608a;}
+.lith-lime{background:rgba(150,150,20,.12);color:#6a6a10;}
+.lith-dolo{background:rgba(130,60,180,.12);color:#6a208a;}
+.lith-coal{background:rgba(80,80,80,.15);color:#444;}
+.lith-unk{background:rgba(120,120,120,.12);color:#666;}
+.stat-box{display:inline-block;margin:4px 8px 4px 0;padding:4px 12px;border-radius:8px;background:rgba(26,127,204,.08);color:#1a5a8a;font-size:.82rem;border:1px solid rgba(26,127,204,.15);}
+</style>
+{% endblock %}
+{% block scripts %}
+<script>
+// ── FORM VALUE HELPER (was missing — root cause of "v is not defined" error) ──
+function v(id){
+  const el = document.getElementById(id);
+  if(!el) return '';
+  if(el.tagName === 'SELECT') return el.options[el.selectedIndex] ? el.options[el.selectedIndex].value : '';
+  return el.value !== undefined ? el.value : '';
+}
+
+// ── TAB SWITCHING ──────────────────────────────────────────
+const PTABS=['vsh','porosity','saturation','export'];
+document.querySelectorAll('#predTabs .nav-link').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('#predTabs .nav-link').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    const t=btn.dataset.ptab;
+    PTABS.forEach(id=>{const el=document.getElementById('ptab-'+id); if(el) el.style.display=(id===t?'block':'none');});
+    if(t==='export') buildExportPreview();
+    _saveTab(t);
+  });
+});
+
+// ── GLOBAL STATE ───────────────────────────────────────────
+let ALL_LOGS = [];
+let CURRENT_WELL_NAME = 'well'; // will be set from analysis detail
+const store = {vsh:null, porosity:null, saturation:null, lithology:null};
+
+// ── RESULT PERSISTENCE (server-backed + sessionStorage fallback) ───────────────────
+const _STORE_KEY  = 'drakeai_pred_store';
+const _WELL_KEY   = 'drakeai_pred_well';
+const _TAB_KEY    = 'drakeai_pred_tab';
+const _FILTER_KEY = 'drakeai_pred_filters';
+
+function _saveStore(){
+  // 1) Primary: save to server (survives page navigation, no size limit)
+  try{
+    fetch('/prediction-cache/save', {
+      method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(store)
+    }).catch(()=>{});
+  }catch(e){}
+  // 2) Secondary: sessionStorage as quick local cache
+  try{
+    sessionStorage.setItem(_STORE_KEY, JSON.stringify(store));
+    sessionStorage.setItem(_WELL_KEY, CURRENT_WELL_NAME);
+  }catch(e){}
+}
+
+async function _loadStoreFromServer(){
+  // Returns true if server has valid cached results for this analysis
+  try{
+    const resp = await fetch('/prediction-cache/load', {credentials:'same-origin'});
+    if(!resp.ok) return false;
+    const data = await resp.json();
+    if(data.success && data.has_data && data.store){
+      Object.assign(store, data.store);
+      return true;
+    }
+    return false;
+  }catch(e){ return false; }
+}
+
+function _loadStoreFromSession(){
+  try{
+    const raw = sessionStorage.getItem(_STORE_KEY);
+    const wn  = sessionStorage.getItem(_WELL_KEY);
+    if(wn) CURRENT_WELL_NAME = wn;
+    if(!raw) return false;
+    const saved = JSON.parse(raw);
+    Object.assign(store, saved);
+    return true;
+  }catch(e){ return false; }
+}
+
+// ── TAB PERSISTENCE ───────────────────────────────────────
+function _saveTab(tabName){
+  try{ sessionStorage.setItem(_TAB_KEY, tabName); }catch(e){}
+}
+function _loadTab(){
+  try{ return sessionStorage.getItem(_TAB_KEY)||'vsh'; }catch(e){ return 'vsh'; }
+}
+
+// ── DEPTH FILTER PERSISTENCE ──────────────────────────────
+function _saveFilters(){
+  try{
+    const f = {
+      vshMin: document.getElementById('vshDepthMin').value,
+      vshMax: document.getElementById('vshDepthMax').value,
+      vshUnit: document.getElementById('vshDepthUnit').value,
+      porMin: document.getElementById('porDepthMin').value,
+      porMax: document.getElementById('porDepthMax').value,
+      porUnit: document.getElementById('porDepthUnit').value,
+      satMin: document.getElementById('satDepthMin').value,
+      satMax: document.getElementById('satDepthMax').value,
+      satUnit: document.getElementById('satDepthUnit').value,
+    };
+    sessionStorage.setItem(_FILTER_KEY, JSON.stringify(f));
+  }catch(e){}
+}
+function _loadFilters(){
+  try{
+    const raw = sessionStorage.getItem(_FILTER_KEY);
+    if(!raw) return;
+    const f = JSON.parse(raw);
+    const set = (id,val)=>{ const el=document.getElementById(id); if(el&&val!==undefined&&val!==null) el.value=val; };
+    set('vshDepthMin', f.vshMin); set('vshDepthMax', f.vshMax); set('vshDepthUnit', f.vshUnit);
+    set('porDepthMin', f.porMin); set('porDepthMax', f.porMax); set('porDepthUnit', f.porUnit);
+    set('satDepthMin', f.satMin); set('satDepthMax', f.satMax); set('satDepthUnit', f.satUnit);
+  }catch(e){}
+}
+
+// ── DISPLAY HELPERS ────────────────────────────────────────
+function fmtNum(v, decimals=4){
+  if(v===null||v===undefined||v==='') return '<span class="val-null">—</span>';
+  const n=Number(v);
+  if(isNaN(n)) return '<span class="val-null">—</span>';
+  return '<span class="val-valid">'+n.toFixed(decimals)+'</span>';
+}
+function fmtDepth(v){
+  if(v===null||v===undefined) return '<span class="val-null">—</span>';
+  const n=Number(v); if(isNaN(n)) return String(v);
+  return '<strong>'+n.toFixed(2)+'</strong>';
+}
+function fmtStr(v){
+  if(!v||v==='') return '<span class="val-null">—</span>';
+  return String(v);
+}
+function fmtLith(v){
+  if(!v||v==='') return '<span class="lith-badge lith-unk">Unknown</span>';
+  const cls = {
+    'Shale':'lith-shale','Clean Sandstone':'lith-sand','Shaly Sand':'lith-shalyS',
+    'Limestone':'lith-lime','Dolomite':'lith-dolo','Coal':'lith-coal'
+  }[v]||'lith-unk';
+  return `<span class="lith-badge ${cls}">${v}</span>`;
+}
+function fmtSW(v){
+  if(v===null||v===undefined||v==='') return '<span class="val-null">—</span>';
+  const n=Number(v); if(isNaN(n)) return '<span class="val-null">—</span>';
+  const pct=(n*100).toFixed(1);
+  const color = n<0.4?'#7ddf8c':n<0.7?'#f8c87a':'#f07a7a';
+  return `<span style="color:${color};font-weight:500;">${n.toFixed(4)} <span style="font-size:.8em;opacity:.7;">(${pct}%)</span></span>`;
+}
+function fmtVSH(v){
+  if(v===null||v===undefined||v==='') return '<span class="val-null">—</span>';
+  const n=Number(v); if(isNaN(n)) return '<span class="val-null">—</span>';
+  const pct=(n*100).toFixed(1);
+  const color = n<0.3?'#7ddf8c':n<0.5?'#f8c87a':'#f07a7a';
+  return `<span style="color:${color};font-weight:500;">${n.toFixed(4)} <span style="font-size:.8em;opacity:.7;">(${pct}%)</span></span>`;
+}
+
+function showStatus(msg, type='info'){
+  const el=document.getElementById('globalStatus');
+  const bg={info:'rgba(26,127,204,.10)',success:'rgba(26,180,80,.10)',warn:'rgba(200,150,20,.10)',error:'rgba(200,50,50,.10)'}[type]||'rgba(26,127,204,.10)';
+  const border={info:'rgba(26,127,204,.25)',success:'rgba(26,180,80,.25)',warn:'rgba(200,150,20,.25)',error:'rgba(200,50,50,.25)'}[type]||'rgba(26,127,204,.25)';
+  const color={info:'#1a5a8a',success:'#1a6a2a',warn:'#7a5a10',error:'#8a1a1a'}[type]||'#1a5a8a';
+  el.style.cssText=`display:block;padding:10px 16px;border-radius:10px;margin-bottom:14px;font-size:.9rem;background:${bg};border:1px solid ${border};color:${color};`;
+  el.innerHTML=msg;
+}
+
+// ── STATS SUMMARY ──────────────────────────────────────────
+function computeStats(rows, col){
+  const vals=rows.map(r=>r[col]).filter(v=>v!==null&&v!==undefined&&!isNaN(Number(v))).map(Number);
+  if(!vals.length) return null;
+  return {
+    count:vals.length, total:rows.length,
+    min:Math.min(...vals).toFixed(4), max:Math.max(...vals).toFixed(4),
+    avg:(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(4)
+  };
+}
+function renderStats(boxId, items){
+  const el=document.getElementById(boxId);
+  if(!el) return;
+  const html=items.map(({label,s})=>{
+    if(!s) return `<span class="stat-box"><em>${label}:</em> no data</span>`;
+    return `<span class="stat-box"><em>${label}:</em> avg <b>${s.avg}</b> | min ${s.min} | max ${s.max} | ${s.count}/${s.total} valid pts</span>`;
+  }).join('');
+  el.innerHTML=html;
+  el.style.display='block';
+}
+
+// ── LOG DROPDOWN POPULATION ────────────────────────────────
+function setOptions(id, logs, preferred){
+  const el=document.getElementById(id); if(!el) return;
+  const validLogs=logs.filter(l=>String(l).toUpperCase()!=='DEPTH');
+  el.innerHTML=validLogs.length
+    ? validLogs.map(x=>`<option value="${x}">${x}</option>`).join('')
+    : '<option value="">No logs available</option>';
+  if(!preferred||!preferred.length) return;
+  const logU=validLogs.map(l=>({orig:l,up:String(l).toUpperCase()}));
+  // Pass 1: exact match
+  for(const p of preferred){const pu=p.toUpperCase(); const m=logU.find(l=>l.up===pu); if(m){el.value=m.orig;return;}}
+  // Pass 2: log starts with candidate
+  for(const p of preferred){const pu=p.toUpperCase(); const m=logU.find(l=>l.up.startsWith(pu)); if(m){el.value=m.orig;return;}}
+  // Pass 3: candidate starts with log
+  for(const p of preferred){const pu=p.toUpperCase(); const m=logU.find(l=>pu.startsWith(l.up)&&l.up.length>=2); if(m){el.value=m.orig;return;}}
+  // Pass 4: candidate contained in log
+  for(const p of preferred){const pu=p.toUpperCase(); const m=logU.find(l=>l.up.includes(pu)&&pu.length>=2); if(m){el.value=m.orig;return;}}
+}
+
+// ── TABLE RENDERER ─────────────────────────────────────────
+function tableRows(tbodyId, rows, colDefs, colSpan){
+  const el=document.getElementById(tbodyId); if(!el) return;
+  if(!rows||!rows.length){
+    el.innerHTML=`<tr><td colspan="${colSpan||5}" class="text-center text-warning">No results returned. Ensure the selected logs exist in your LAS file and have valid numeric data.</td></tr>`;
+    return;
+  }
+  el.innerHTML=rows.slice(0,500).map((r,i)=>`<tr><td style="color:#666;font-size:.8em;">${i+1}</td>${colDefs.map(cd=>cd(r)).join('')}</tr>`).join('');
+  if(rows.length>500){
+    el.innerHTML+=`<tr><td colspan="${colSpan||5}" class="text-center text-secondary" style="font-size:.8rem;">Showing first 500 of ${rows.length} rows. Download CSV for full data.</td></tr>`;
+  }
+}
+
+// ── PREDICTION DEPTH FILTER ────────────────────────────────
+// Conversion helpers
+const M_TO_FT = 3.28084;
+const FT_TO_M = 1 / M_TO_FT;
+
+// State caches for full (unfiltered) rows per section
+const _predFullRows = {vsh: null, por: null, sat: null};
+// Track raw data depths (always stored in meters as returned by server)
+const _predDepthRange = {vsh: null, por: null, sat: null};
+
+function _predDepthUnit(section){
+  const map = {vsh:'vshDepthUnit', por:'porDepthUnit', sat:'satDepthUnit'};
+  const el = document.getElementById(map[section]);
+  return el ? el.value : 'm';
+}
+
+function _predConvertDepth(depthM, unit){
+  return unit === 'ft' ? depthM * M_TO_FT : depthM;
+}
+function _predConvertToM(depthDisplay, unit){
+  return unit === 'ft' ? depthDisplay * FT_TO_M : depthDisplay;
+}
+
+function _predDepthLabel(unit){ return unit === 'ft' ? 'ft' : 'm'; }
+
+function _predSetColHeader(section, unit){
+  const hdMap = {vsh:'vshDepthColHeader', por:'porDepthColHeader', sat:'satDepthColHeader'};
+  const el = document.getElementById(hdMap[section]);
+  if(el) el.textContent = 'Depth (' + _predDepthLabel(unit) + ')';
+}
+
+function _predSetDepthHint(section, minM, maxM){
+  const unit = _predDepthUnit(section);
+  const mn = _predConvertDepth(minM, unit).toFixed(1);
+  const mx = _predConvertDepth(maxM, unit).toFixed(1);
+  const hintMap = {vsh:'vshDepthHint', por:'porDepthHint', sat:'satDepthHint'};
+  const el = document.getElementById(hintMap[section]);
+  if(el) el.textContent = 'Data range: ' + mn + ' – ' + mx + ' ' + _predDepthLabel(unit);
+}
+
+function _predFmtDepthVal(depthM, unit){
+  const v = _predConvertDepth(depthM, unit);
+  return '<strong>' + v.toFixed(2) + '</strong>';
+}
+
+function _predGetFilteredRows(section, rows){
+  const unit = _predDepthUnit(section);
+  const minMap = {vsh:'vshDepthMin', por:'porDepthMin', sat:'satDepthMin'};
+  const maxMap = {vsh:'vshDepthMax', por:'porDepthMax', sat:'satDepthMax'};
+  const minDisplay = parseFloat(document.getElementById(minMap[section]).value);
+  const maxDisplay = parseFloat(document.getElementById(maxMap[section]).value);
+  const minM = isNaN(minDisplay) ? null : _predConvertToM(minDisplay, unit);
+  const maxM = isNaN(maxDisplay) ? null : _predConvertToM(maxDisplay, unit);
+  return rows.filter(r => {
+    const d = Number(r.DEPTH);
+    if(isNaN(d)) return false;
+    if(minM !== null && d < minM) return false;
+    if(maxM !== null && d > maxM) return false;
+    return true;
+  });
+}
+
+function _predRenderTable(section, rows){
+  const unit = _predDepthUnit(section);
+  _predSetColHeader(section, unit);
+  if(section === 'vsh'){
+    const valid = rows.filter(r=>r.GR!==null&&r.GR!==undefined&&r.VSH!==null&&r.VSH!==undefined).slice(0,500);
+    tableRows('vshBody', valid, [
+      r=>`<td>${_predFmtDepthVal(r.DEPTH,unit)}</td>`,
+      r=>`<td>${fmtNum(r.GR,2)}</td>`,
+      r=>`<td>${fmtNum(r.IGR,4)}</td>`,
+      r=>`<td>${fmtVSH(r.VSH)}</td>`
+    ], 5);
+  } else if(section === 'por'){
+    const valid = rows.filter(r=>r.PHIT!==null&&r.PHIT!==undefined&&!isNaN(Number(r.PHIT))).slice(0,500);
+    tableRows('porosityBody', valid, [
+      r=>`<td>${_predFmtDepthVal(r.DEPTH,unit)}</td>`,
+      r=>`<td>${fmtNum(r.PHIT,4)}</td>`,
+      r=>`<td>${fmtNum(r.PHIE,4)}</td>`
+    ], 4);
+  } else if(section === 'sat'){
+    const valid = rows.filter(r=>r.SW!==null&&r.SW!==undefined&&!isNaN(Number(r.SW))).slice(0,500);
+    tableRows('saturationBody', valid, [
+      r=>`<td>${_predFmtDepthVal(r.DEPTH,unit)}</td>`,
+      r=>`<td>${fmtNum(r.RT,3)}</td>`,
+      r=>`<td>${fmtSW(r.SW)}</td>`,
+      r=>`<td><span style="font-size:.82rem;color:#9dc8e8;background:rgba(63,163,255,.1);padding:2px 8px;border-radius:5px;">${fmtStr(r.SATURATION_METHOD)}</span></td>`
+    ], 5);
+  }
+}
+
+function _predShowControls(section, rows){
+  const ctrlMap = {vsh:'vshDepthControls', por:'porDepthControls', sat:'satDepthControls'};
+  const el = document.getElementById(ctrlMap[section]);
+  if(el) el.style.display = 'flex';
+  const depths = rows.map(r=>Number(r.DEPTH)).filter(v=>!isNaN(v));
+  if(depths.length){
+    _predDepthRange[section] = {min: Math.min(...depths), max: Math.max(...depths)};
+    _predSetDepthHint(section, _predDepthRange[section].min, _predDepthRange[section].max);
+  }
+  // Wire depth-unit change to update hint and re-render
+  const unitMap = {vsh:'vshDepthUnit', por:'porDepthUnit', sat:'satDepthUnit'};
+  const unitEl = document.getElementById(unitMap[section]);
+  if(unitEl && !unitEl._predWired){
+    unitEl._predWired = true;
+    unitEl.addEventListener('change', function(){
+      if(_predDepthRange[section]){
+        _predSetDepthHint(section, _predDepthRange[section].min, _predDepthRange[section].max);
+        _predSetColHeader(section, unitEl.value);
+      }
+      _saveFilters();
+      // Re-apply current filter with new unit
+      if(_predFullRows[section]) _predRenderTable(section, _predGetFilteredRows(section, _predFullRows[section]));
+    });
+  }
+}
+
+function applyPredDepthFilter(section){
+  if(!_predFullRows[section]){ return; }
+  const filtered = _predGetFilteredRows(section, _predFullRows[section]);
+  _predRenderTable(section, filtered);
+  const unit = _predDepthUnit(section);
+  _saveFilters();
+  showStatus('✅ Depth filter applied — showing ' + filtered.length + ' rows (' + _predDepthLabel(unit) + ' scale).', 'info');
+}
+
+function resetPredDepthFilter(section){
+  const minMap = {vsh:'vshDepthMin', por:'porDepthMin', sat:'satDepthMin'};
+  const maxMap = {vsh:'vshDepthMax', por:'porDepthMax', sat:'satDepthMax'};
+  document.getElementById(minMap[section]).value = '';
+  document.getElementById(maxMap[section]).value = '';
+  _saveFilters();
+  if(_predFullRows[section]) _predRenderTable(section, _predFullRows[section]);
+}
+
+
+
+// ── VSH FORMULA MAP ────────────────────────────────────────
+const VSH_FORMULA_MAP = {
+  linear: 'IGR = (GRlog − GRmin) / (GRmax − GRmin) &nbsp;→&nbsp; Vsh = IGR',
+  larionov_tertiary: 'IGR = (GRlog − GRmin) / (GRmax − GRmin) &nbsp;→&nbsp; Vsh = 0.083 × (2^(3.7×IGR) − 1)',
+  larionov_older: 'IGR = (GRlog − GRmin) / (GRmax − GRmin) &nbsp;→&nbsp; Vsh = 0.33 × (2^(2×IGR) − 1)',
+  clavier: 'IGR = (GRlog − GRmin) / (GRmax − GRmin) &nbsp;→&nbsp; Vsh = 1.7 − √(3.38 − (IGR+0.7)²)',
+  steiber: 'IGR = (GRlog − GRmin) / (GRmax − GRmin) &nbsp;→&nbsp; Vsh = IGR / (3 − 2×IGR)'
+};
+document.getElementById('vshMethod').addEventListener('change',function(){
+  const ft=document.getElementById('vshFormulaText');
+  if(ft) ft.innerHTML=VSH_FORMULA_MAP[this.value]||'';
+});
+
+const POR_FORMULA_MAP = {
+  density: 'PHIT = (RHOMA − RHOB) / (RHOMA − RHOF) &nbsp;|&nbsp; PHIE = PHIT × (1 − Vsh)',
+  neutron: 'PHIT = NPHI (fraction) &nbsp;|&nbsp; PHIE = PHIT × (1 − Vsh)',
+  sonic: 'PHIT = (DT − DTMA) / (DTFL − DTMA) (Wyllie) &nbsp;|&nbsp; PHIE = PHIT × (1 − Vsh)',
+  density_neutron: 'PHIT = √((PHID² + PHIN²) / 2) &nbsp;[RMS Average]&nbsp;|&nbsp; PHIE = PHIT × (1 − Vsh)'
+};
+document.getElementById('porosityMethod').addEventListener('change',function(){
+  const ft=document.getElementById('porFormulaText');
+  if(ft) ft.innerHTML=POR_FORMULA_MAP[this.value]||'';
+});
+
+// ── BUILD PAYLOAD (shared config for all sections) ─────────
+function buildPayload(section){
+  return {
+    vsh:{gr_log:v('vshLog'), gr_min:v('grMin'), gr_max:v('grMax'), method:v('vshMethod')},
+    porosity:{method:v('porosityMethod'), rhob_log:v('rhobLog'), nphi_log:v('nphiLog'), dt_log:v('dtLog'), rhoma:v('rhoma'), rhof:v('rhof'), dtma:v('dtma'), dtfl:v('dtfl'), nphi_unit:v('nphiUnit')},
+    saturation:{method:v('satMethod'), rt_log:v('rtLog'), rw:v('rw'), rsh:v('rsh'), a:v('satA'), m:v('satM'), n:v('satN')},
+    lithology:{gr_or_vsh_log:v('lithGrVsh'), rhob_log:v('lithRhob'), nphi_log:v('lithNphi'), dt_log:v('lithDt'), pe_log:v('lithPe'), clean_vsh_max:v('cleanVshMax'), shaly_vsh_max:v('shalyVshMax'), phie_min:v('phieMin'), coal_rhob_max:v('coalRhobMax')},
+    section
+  };
+}
+
+// ── UNIFIED API CALL ───────────────────────────────────────
+async function callPrediction(section){
+  const res=await fetch('/prediction-sections',{
+    method:'POST', credentials:'same-origin',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(buildPayload(section))
+  });
+  const text=await res.text();
+  let data;
+  try{data=JSON.parse(text);}catch(e){throw new Error('Server returned invalid response. Check that a LAS file is loaded.');}
+  if(!data.success) throw new Error(data.message||'Calculation failed.');
+  return data;
+}
+
+// ── VSH ────────────────────────────────────────────────────
+async function runVsh(){
+  const btn=document.getElementById('runVsh');
+  btn.disabled=true; btn.textContent='Calculating…';
+  document.getElementById('vshBody').innerHTML='<tr><td colspan="5" class="text-center text-secondary">⚙️ Computing VSH values…</td></tr>';
+  document.getElementById('vshResultStats').style.display='none';
+  try{
+    const data=await callPrediction('vsh');
+    store.vsh=data;
+    _saveStore();
+    const rows=data.vsh_table||[];
+    _predFullRows.vsh = rows;
+    _predShowControls('vsh', rows);
+
+    // Check for all-null GR
+    const grNulls=rows.filter(r=>r.GR===null||r.GR===undefined).length;
+    const grValid=rows.length-grNulls;
+    const w=document.getElementById('vshDataWarning');
+    if(w){
+      if(grValid===0){
+        w.innerHTML=`<div style="padding:8px 14px;border-radius:8px;background:rgba(245,130,32,.12);border:1px solid rgba(245,130,32,.3);color:#f8c87a;font-size:.85rem;margin-bottom:8px;">
+          ⚠️ GR log <strong>${v('vshLog')}</strong> returned no valid values. Try selecting a different GR curve from the dropdown, or check that your LAS file contains GR data.</div>`;
+      } else {
+        w.innerHTML=grNulls>0
+          ? `<div style="padding:6px 14px;border-radius:8px;background:rgba(245,180,30,.08);border:1px solid rgba(245,180,30,.2);color:#d4b96e;font-size:.82rem;margin-bottom:8px;">ℹ️ ${grNulls} depth points have missing GR values (shown as —). ${grValid} valid points computed.</div>`
+          : '';
+      }
+    }
+
+    const validRows = rows.filter(r => r.GR !== null && r.GR !== undefined && r.VSH !== null && r.VSH !== undefined).slice(0, 5);
+    _predRenderTable('vsh', validRows);
+
+    renderStats('vshResultStats',[
+      {label:'GR',s:computeStats(rows,'GR')},
+      {label:'IGR',s:computeStats(rows,'IGR')},
+      {label:'VSH',s:computeStats(rows,'VSH')}
+    ]);
+
+    const validVsh=rows.filter(r=>r.VSH!==null&&r.VSH!==undefined&&!isNaN(Number(r.VSH))).length;
+    showStatus(`✅ VSH calculated — ${validVsh} of ${rows.length} depth points have valid results.`, 'success');
+  }catch(err){
+    console.error('Vsh error:',err);
+    document.getElementById('vshBody').innerHTML=`<tr><td colspan="5" class="text-warning text-center">❌ ${err.message}</td></tr>`;
+    showStatus('❌ VSH error: '+err.message,'error');
+  }finally{btn.disabled=false; btn.textContent='Calculate Vsh';}
+}
+
+// ── POROSITY ───────────────────────────────────────────────
+async function runPorosity(){
+  const btn=document.getElementById('runPorosity');
+  btn.disabled=true; btn.textContent='Calculating…';
+  document.getElementById('porosityBody').innerHTML='<tr><td colspan="4" class="text-center text-secondary">⚙️ Computing porosity values…</td></tr>';
+  document.getElementById('porResultStats').style.display='none';
+  try{
+    const data=await callPrediction('porosity');
+    store.porosity=data;
+    _saveStore();
+    const rows=data.porosity_table||[];
+    _predFullRows.por = rows;
+    _predShowControls('por', rows);
+
+    const w=document.getElementById('phieWarning');
+    if(w){
+      const phieValid=rows.filter(r=>r.PHIE!==null&&r.PHIE!==undefined&&!isNaN(Number(r.PHIE))).length;
+      const phitValid=rows.filter(r=>r.PHIT!==null&&r.PHIT!==undefined&&!isNaN(Number(r.PHIT))).length;
+      w.textContent = (data.warnings&&data.warnings.phie) ? data.warnings.phie
+        : phitValid===0 ? `⚠️ PHIT is all null — selected ${v('rhobLog')||v('nphiLog')||v('dtLog')} log may not exist or have valid data in this LAS file.`
+        : phieValid===0 ? '⚠️ PHIE is null — run VSH calculation first to enable effective porosity.'
+        : '';
+    }
+
+    const validPorRows = rows.filter(r => r.PHIT !== null && r.PHIT !== undefined && !isNaN(Number(r.PHIT))).slice(0, 5);
+    _predRenderTable('por', validPorRows);
+
+    renderStats('porResultStats',[
+      {label:'PHIT',s:computeStats(rows,'PHIT')},
+      {label:'PHIE',s:computeStats(rows,'PHIE')}
+    ]);
+
+    const validPHIT=rows.filter(r=>r.PHIT!==null&&!isNaN(Number(r.PHIT))).length;
+    showStatus(`✅ Porosity calculated — ${validPHIT} of ${rows.length} depth points have valid PHIT results.`,'success');
+  }catch(err){
+    console.error('Porosity error:',err);
+    document.getElementById('porosityBody').innerHTML=`<tr><td colspan="4" class="text-warning text-center">❌ ${err.message}</td></tr>`;
+    showStatus('❌ Porosity error: '+err.message,'error');
+  }finally{btn.disabled=false; btn.textContent='Calculate Porosity';}
+}
+
+// ── SATURATION ─────────────────────────────────────────────
+async function runSaturation(){
+  const btn=document.getElementById('runSaturation');
+  btn.disabled=true; btn.textContent='Calculating…';
+  document.getElementById('saturationBody').innerHTML='<tr><td colspan="5" class="text-center text-secondary">⚙️ Computing water saturation…</td></tr>';
+  document.getElementById('satResultStats').style.display='none';
+  const meth=v('satMethod');
+  const sf=document.getElementById('saturationFormula');
+  if(sf) sf.textContent = meth==='archie'?'Active: Archie — Sw = ((a×Rw)/(PHIE^m×Rt))^(1/n)'
+    : meth==='indonesia'?'Active: Indonesia equation for shaly sands'
+    : 'Active: Auto mode — Archie when VSH≤0.15, Indonesia when VSH>0.15';
+  try{
+    const data=await callPrediction('saturation');
+    store.saturation=data;
+    _saveStore();
+    const rows=data.saturation_table||[];
+    _predShowControls('sat', rows);
+
+    const validSatRows = rows.filter(r => r.SW !== null && r.SW !== undefined && !isNaN(Number(r.SW))).slice(0, 5);
+    _predRenderTable('sat', validSatRows);
+
+    renderStats('satResultStats',[
+      {label:'RT',s:computeStats(rows,'RT')},
+      {label:'SW',s:computeStats(rows,'SW')}
+    ]);
+
+    const validSW=rows.filter(r=>r.SW!==null&&!isNaN(Number(r.SW))).length;
+    showStatus(`✅ Saturation calculated — ${validSW} of ${rows.length} depth points have valid SW results.`,'success');
+  }catch(err){
+    console.error('Saturation error:',err);
+    document.getElementById('saturationBody').innerHTML=`<tr><td colspan="5" class="text-warning text-center">❌ ${err.message}</td></tr>`;
+    showStatus('❌ Saturation error: '+err.message,'error');
+  }finally{btn.disabled=false; btn.textContent='Calculate Saturation';}
+}
+
+// ── LITHOLOGY ──────────────────────────────────────────────
+async function runLithology(){
+  const btn=document.getElementById('runLithology');
+  btn.disabled=true; btn.textContent='Identifying…';
+  document.getElementById('lithologyBody').innerHTML='<tr><td colspan="5" class="text-center text-secondary">⚙️ Identifying lithologies…</td></tr>';
+  document.getElementById('lithResultStats').style.display='none';
+  try{
+    const data=await callPrediction('lithology');
+    store.lithology=data;
+    _saveStore();
+    const rows=data.lithology_table||[];
+
+    const validLithRows = rows.filter(r => (r.VSH !== null && r.VSH !== undefined && !isNaN(Number(r.VSH))) || (r.RHOB !== null && r.RHOB !== undefined && !isNaN(Number(r.RHOB)))).slice(0, 5);
+    tableRows('lithologyBody', validLithRows, [
+      r=>`<td>${fmtDepth(r.DEPTH)}</td>`,
+      r=>`<td>${fmtVSH(r.VSH)}</td>`,
+      r=>`<td>${fmtNum(r.RHOB,3)}</td>`,
+      r=>`<td>${fmtLith(r.LITHOLOGY)}</td>`
+    ], 5);
+
+    // Lithology distribution
+    const counts={};
+    rows.forEach(r=>{const l=r.LITHOLOGY||'Unknown'; counts[l]=(counts[l]||0)+1;});
+    const dist=Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([k,n])=>`<span class="stat-box"><em>${k}:</em> <b>${n}</b> pts (${(n/rows.length*100).toFixed(1)}%)</span>`).join('');
+    const statsEl=document.getElementById('lithResultStats');
+    if(statsEl){statsEl.innerHTML='<strong>Distribution:</strong> '+dist; statsEl.style.display='block';}
+
+    showStatus(`✅ Lithology identified — ${rows.length} depth points classified.`,'success');
+  }catch(err){
+    console.error('Lithology error:',err);
+    document.getElementById('lithologyBody').innerHTML=`<tr><td colspan="5" class="text-warning text-center">❌ ${err.message}</td></tr>`;
+    showStatus('❌ Lithology error: '+err.message,'error');
+  }finally{btn.disabled=false; btn.textContent='Identify Lithology';}
+}
+
+// ── EXPORT PREVIEW ─────────────────────────────────────────
+function buildExportPreview(){
+  const vshEx=(store.vsh&&store.vsh.exports)?store.vsh.exports.vsh||[]:[];
+  const porEx=(store.porosity&&store.porosity.exports)?store.porosity.exports.porosity||[]:[];
+  const satEx=(store.saturation&&store.saturation.exports)?store.saturation.exports.saturation||[]:[];
+  const litEx=(store.lithology&&store.lithology.exports)?store.lithology.exports.lithology||[]:[];
+  const n=Math.max(vshEx.length,porEx.length,satEx.length,litEx.length);
+  if(!n){
+    document.getElementById('exportPreviewBody').innerHTML='<tr><td colspan="9" class="text-center text-secondary">Run calculations in each tab first, then return here to export.</td></tr>';
+    return;
+  }
+  // Collect all rows, then filter to those with at least one valid numeric value, then take first 5
+  const allMerged=[];
+  for(let i=0;i<n;i++){
+    const vr=vshEx[i]||{}; const pr=porEx[i]||{}; const sr=satEx[i]||{}; const lr=litEx[i]||{};
+    const depth=vr.DEPTH||pr.DEPTH||sr.DEPTH||lr.DEPTH;
+    const hasValue=(vr.VSH!=null&&!isNaN(Number(vr.VSH)))||(pr.PHIT!=null&&!isNaN(Number(pr.PHIT)))||(sr.SW!=null&&!isNaN(Number(sr.SW)))||((lr.VSH!=null&&!isNaN(Number(lr.VSH)))||(lr.RHOB!=null&&!isNaN(Number(lr.RHOB))));
+    if(depth!=null&&hasValue) allMerged.push({vr,pr,sr,lr,depth});
+  }
+  const topRows=allMerged.slice(0,5);
+  if(!topRows.length){
+    document.getElementById('exportPreviewBody').innerHTML='<tr><td colspan="9" class="text-center text-secondary">No valid data rows found. Run all calculations first.</td></tr>';
+    return;
+  }
+  const rows=topRows.map(({vr,pr,sr,lr,depth})=>`<tr>
+      <td><strong>${Number(depth).toFixed(2)}</strong></td>
+      <td>${fmtNum(vr.GR,2)}</td>
+      <td>${fmtVSH(vr.VSH)}</td>
+      <td>${fmtNum(pr.PHIT,4)}</td>
+      <td>${fmtNum(pr.PHIE,4)}</td>
+      <td>${fmtNum(sr.RT,3)}</td>
+      <td>${fmtSW(sr.SW)}</td>
+      <td><span style="font-size:.8rem;color:#9dc8e8;">${fmtStr(sr.SATURATION_METHOD)}</span></td>
+      <td>${fmtLith(lr.LITHOLOGY)}</td>
+    </tr>`);
+  document.getElementById('exportPreviewBody').innerHTML=rows.join('')||'<tr><td colspan="9" class="text-center text-secondary">No data.</td></tr>';
+}
+
+// ── CSV DOWNLOAD HELPERS ───────────────────────────────────
+function _safeWellName(){
+  return (CURRENT_WELL_NAME||'well').replace(/[^a-zA-Z0-9_\-]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'').toLowerCase() || 'well';
+}
+function sectionToCSV(sectionKey, exportKey, cols){
+  const src=store[sectionKey];
+  if(!src||!src.exports){alert('Please run the '+sectionKey+' calculation first.'); return;}
+  const rows=src.exports[exportKey]||[];
+  if(!rows.length){alert('No data to download.'); return;}
+  const headers=cols||Object.keys(rows[0]);
+  const csv=[headers.join(','),...rows.map(r=>headers.map(h=>{
+    const val=r[h]; return val===null||val===undefined?'':String(val).includes(',')?'"'+val+'"':val;
+  }).join(','))].join('\n');
+  downloadCSV(csv, _safeWellName()+'_'+sectionKey+'_result.csv');
+}
+function downloadCSV(csv,filename){
+  const blob=new Blob([csv],{type:'text/csv'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+async function downloadAllCSV(){
+  const hasAny=store.vsh||store.porosity||store.saturation||store.lithology;
+  if(!hasAny){alert('Please run at least one calculation first.'); return;}
+  const vshEx=(store.vsh&&store.vsh.exports)?store.vsh.exports.vsh||[]:[];
+  const porEx=(store.porosity&&store.porosity.exports)?store.porosity.exports.porosity||[]:[];
+  const satEx=(store.saturation&&store.saturation.exports)?store.saturation.exports.saturation||[]:[];
+  const litEx=(store.lithology&&store.lithology.exports)?store.lithology.exports.lithology||[]:[];
+  const n=Math.max(vshEx.length,porEx.length,satEx.length,litEx.length);
+  if(!n){alert('No calculated data. Please run the calculations first.'); return;}
+  const rows=[];
+  for(let i=0;i<n;i++){
+    const vr=vshEx[i]||{}; const pr=porEx[i]||{}; const sr=satEx[i]||{}; const lr=litEx[i]||{};
+    rows.push({DEPTH:vr.DEPTH||pr.DEPTH||sr.DEPTH||lr.DEPTH,GR:vr.GR,IGR:vr.IGR,VSH:vr.VSH,PHIT:pr.PHIT,PHIE:pr.PHIE,RT:sr.RT,SW:sr.SW,SATURATION_METHOD:sr.SATURATION_METHOD,LITHOLOGY:lr.LITHOLOGY});
+  }
+  const headers=['DEPTH','GR','IGR','VSH','PHIT','PHIE','RT','SW','SATURATION_METHOD','LITHOLOGY'];
+  const csv=[headers.join(','),...rows.map(r=>headers.map(h=>{
+    const val=r[h]; return val===null||val===undefined?'':String(val).includes(',')?'"'+val+'"':val;
+  }).join(','))].join('\n');
+  downloadCSV(csv, _safeWellName()+'_all_reservoir_parameters.csv');
+}
+
+// ── BUTTON WIRING ──────────────────────────────────────────
+document.getElementById('runVsh').addEventListener('click',e=>{e.preventDefault();runVsh();});
+document.getElementById('runPorosity').addEventListener('click',e=>{e.preventDefault();runPorosity();});
+document.getElementById('runSaturation').addEventListener('click',e=>{e.preventDefault();runSaturation();});
+document.getElementById('runLithology').addEventListener('click',e=>{e.preventDefault();runLithology();});
+document.getElementById('downloadVsh').addEventListener('click',()=>sectionToCSV('vsh','vsh',['DEPTH','GR','IGR','VSH']));
+document.getElementById('downloadPorosity').addEventListener('click',()=>sectionToCSV('porosity','porosity',['DEPTH','PHIT','PHIE']));
+document.getElementById('downloadSaturation').addEventListener('click',()=>sectionToCSV('saturation','saturation',['DEPTH','RT','SW','SATURATION_METHOD']));
+document.getElementById('downloadLithology').addEventListener('click',()=>sectionToCSV('lithology','lithology',['DEPTH','VSH','RHOB','LITHOLOGY']));
+document.getElementById('downloadAll').addEventListener('click',downloadAllCSV);
+
+// ── INIT: populate dropdowns, do NOT auto-run ──────────────
+async function initPrediction(){
+  try{
+    const detail=await fetch('/analysis-detail',{credentials:'same-origin'}).then(r=>{
+      if(!r.ok) throw new Error('Session expired or no LAS file loaded.');
+      return r.json();
+    }).catch(e=>{throw e;});
+
+    if(!detail.success){
+      const msg=detail.message||'No LAS file loaded. Please upload a file from the Dashboard.';
+      ['vshBody','saturationBody','lithologyBody'].forEach(id=>{
+        const el=document.getElementById(id);
+        if(el) el.innerHTML=`<tr><td colspan="5" class="text-warning text-center">⚠️ ${msg}</td></tr>`;
+      });
+      document.getElementById('porosityBody').innerHTML=`<tr><td colspan="4" class="text-warning text-center">⚠️ ${msg}</td></tr>`;
+      showStatus('⚠️ '+msg,'warn');
+      return;
+    }
+
+    ALL_LOGS=detail.analysis.log_names||[];
+    CURRENT_WELL_NAME = (detail.analysis.summary && detail.analysis.summary.well_name) ? detail.analysis.summary.well_name : (detail.analysis.well_name||'well');
+    sessionStorage.setItem(_WELL_KEY, CURRENT_WELL_NAME);
+    if(!ALL_LOGS.length){
+      showStatus('⚠️ LAS file loaded but no log curves found. Please re-upload a valid LAS file.','warn');
+      return;
+    }
+
+    // Populate all dropdowns with best-guess selections
+    setOptions('vshLog',    ALL_LOGS, ['GRD','GR','GRS','GRR','CGR','SGR','HSGR','GRC','GAMMA','GAMMARAY','GR_RAW']);
+    // Build single combined porosity log dropdown with grouped options
+    (function(){
+      const sel = document.getElementById('porosityLogSelect');
+      if(!sel) return;
+      const validLogs = ALL_LOGS.filter(l => String(l).toUpperCase() !== 'DEPTH');
+      const rhobKeys = ['RHOB','RHOZ','DEN','ZDEN','RHOG','DRHOB'];
+      const nphiKeys = ['NPHI','NPHISS','NPHIS','NPL','TNPH','TNPHI','CNPOR','CNC','NPOR','CNCF','PHIN','BPHI'];
+      const dtKeys   = ['DT','DTC','DTP','DTCO','AC','SONIC','DTSM','DTL'];
+      function matchLog(l, keys){ const u=String(l).toUpperCase(); return keys.some(k=>u===k||u.startsWith(k)||k.startsWith(u)&&u.length>=2); }
+      const rhobLogs=validLogs.filter(l=>matchLog(l,rhobKeys));
+      const nphiLogs=validLogs.filter(l=>matchLog(l,nphiKeys));
+      const dtLogs=validLogs.filter(l=>matchLog(l,dtKeys));
+      const used=new Set([...rhobLogs,...nphiLogs,...dtLogs]);
+      const otherLogs=validLogs.filter(l=>!used.has(l));
+      let html='';
+      if(rhobLogs.length) html+='<optgroup label="── Density (RHOB)">'+rhobLogs.map(x=>'<option value="'+x+'" data-type="rhob">'+x+'</option>').join('')+'</optgroup>';
+      if(nphiLogs.length) html+='<optgroup label="── Neutron (NPHI)">'+nphiLogs.map(x=>'<option value="'+x+'" data-type="nphi">'+x+'</option>').join('')+'</optgroup>';
+      if(dtLogs.length)   html+='<optgroup label="── Sonic (DT)">'+dtLogs.map(x=>'<option value="'+x+'" data-type="dt">'+x+'</option>').join('')+'</optgroup>';
+      if(otherLogs.length)html+='<optgroup label="── Other">'+otherLogs.map(x=>'<option value="'+x+'" data-type="other">'+x+'</option>').join('')+'</optgroup>';
+      sel.innerHTML = html || '<option value="">No logs available</option>';
+      function syncHiddenLogs(){
+        const chosen = sel.value;
+        const opt = Array.from(sel.options).find(o=>o.value===chosen);
+        const dtype = opt ? opt.dataset.type : 'other';
+        document.getElementById('rhobLog').value = (dtype==='rhob') ? chosen : (rhobLogs[0]||chosen);
+        document.getElementById('nphiLog').value = (dtype==='nphi') ? chosen : (nphiLogs[0]||chosen);
+        document.getElementById('dtLog').value   = (dtype==='dt')   ? chosen : (dtLogs[0]||chosen);
+      }
+      syncHiddenLogs();
+      sel.addEventListener('change', syncHiddenLogs);
+    })();
+    setOptions('rtLog',     ALL_LOGS, ['RT','RESD','RDEP','RDEEP','ILD','LLD','AT90','AHT90','HDRS','RILD','RLLD','RLA5','ILM','LLM','RMED']);
+    setOptions('lithRhob',  ALL_LOGS, ['RHOB','RHOZ','DEN','ZDEN','RHOG','DRHOB']);
+    setOptions('lithNphi',  ALL_LOGS, ['NPHI','NPHISS','NPHIS','NPL','TNPH','TNPHI','CNPOR','CNC','NPOR','CNCF','PHIN','BPHI']);
+    setOptions('lithDt',    ALL_LOGS, ['DT','DTC','DTP','DTCO','AC','SONIC','DTSM','DTL']);
+    setOptions('lithPe',    ALL_LOGS, ['PE','PEF','PEFZ']);
+
+    // Ready messages
+    document.getElementById('vshBody').innerHTML='<tr><td colspan="5" class="text-center text-secondary">✅ Logs loaded. Select your GR log and click "Calculate Vsh".</td></tr>';
+    document.getElementById('porosityBody').innerHTML='<tr><td colspan="4" class="text-center text-secondary">✅ Select method and logs, then click "Calculate Porosity".</td></tr>';
+    document.getElementById('saturationBody').innerHTML='<tr><td colspan="5" class="text-center text-secondary">✅ Select Rt log and click "Calculate Saturation".</td></tr>';
+    document.getElementById('lithologyBody').innerHTML='<tr><td colspan="5" class="text-center text-secondary">✅ Configure logs and click "Identify Lithology".</td></tr>';
+
+    showStatus(`✅ Ready — ${ALL_LOGS.length} log curves detected: ${ALL_LOGS.join(', ')}`, 'success');
+
+    // ── Restore previous session results (server-first, sessionStorage fallback) ──
+    const restoredFromServer = await _loadStoreFromServer();
+    const hasRestored = restoredFromServer || (!restoredFromServer && _loadStoreFromSession());
+    if(hasRestored){
+      // Restore depth filter inputs first (before _predShowControls which reads them)
+      _loadFilters();
+
+      if(store.vsh && store.vsh.vsh_table){
+        _predFullRows.vsh = store.vsh.vsh_table;
+        _predShowControls('vsh', store.vsh.vsh_table);
+        const filteredVsh = _predGetFilteredRows('vsh', store.vsh.vsh_table);
+        _predRenderTable('vsh', filteredVsh);
+        renderStats('vshResultStats',[{label:'GR',s:computeStats(store.vsh.vsh_table,'GR')},{label:'IGR',s:computeStats(store.vsh.vsh_table,'IGR')},{label:'VSH',s:computeStats(store.vsh.vsh_table,'VSH')}]);
+        showStatus('✅ Previous results restored. Recalculate anytime to update.' + (restoredFromServer ? '' : ' (loaded from browser cache)'),'success');
+      }
+      if(store.porosity && store.porosity.porosity_table){
+        _predFullRows.por = store.porosity.porosity_table;
+        _predShowControls('por', store.porosity.porosity_table);
+        const filteredPor = _predGetFilteredRows('por', store.porosity.porosity_table);
+        _predRenderTable('por', filteredPor);
+        renderStats('porResultStats',[{label:'PHIT',s:computeStats(store.porosity.porosity_table,'PHIT')},{label:'PHIE',s:computeStats(store.porosity.porosity_table,'PHIE')}]);
+      }
+      if(store.saturation && store.saturation.saturation_table){
+        _predFullRows.sat = store.saturation.saturation_table;
+        _predShowControls('sat', store.saturation.saturation_table);
+        const filteredSat = _predGetFilteredRows('sat', store.saturation.saturation_table);
+        _predRenderTable('sat', filteredSat);
+        renderStats('satResultStats',[{label:'RT',s:computeStats(store.saturation.saturation_table,'RT')},{label:'SW',s:computeStats(store.saturation.saturation_table,'SW')}]);
+      }
+
+      // Restore active tab last (so the correct section is visible)
+      const savedTab = _loadTab();
+      if(savedTab && savedTab !== 'vsh'){
+        const tabBtn = document.querySelector(`#predTabs .nav-link[data-ptab="${savedTab}"]`);
+        if(tabBtn){
+          document.querySelectorAll('#predTabs .nav-link').forEach(b=>b.classList.remove('active'));
+          tabBtn.classList.add('active');
+          PTABS.forEach(id=>{const el=document.getElementById('ptab-'+id); if(el) el.style.display=(id===savedTab?'block':'none');});
+          if(savedTab==='export') buildExportPreview();
+        }
+      }
+    }
+
+  }catch(err){
+    console.error('Prediction init error:',err);
+    ['vshBody','saturationBody','lithologyBody'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el) el.innerHTML=`<tr><td colspan="5" class="text-warning text-center">❌ ${err.message||'No LAS file loaded.'}</td></tr>`;
+    });
+    document.getElementById('porosityBody').innerHTML=`<tr><td colspan="4" class="text-warning text-center">❌ ${err.message||'No LAS file loaded.'}</td></tr>`;
+    showStatus('❌ '+( err.message||'No LAS file loaded.'),'error');
+  }
+}
+document.addEventListener('DOMContentLoaded', initPrediction);
+</script>
+{% endblock %}
